@@ -2,18 +2,21 @@ import { MobileNav } from "@/components/layout/mobile-nav";
 import { Navbar } from "@/components/layout/navbar";
 import { PageContainer } from "@/components/layout/page-container";
 import { Sidebar } from "@/components/layout/sidebar";
+import type { NavItem } from "@/lib/navigation";
 
 type AppShellProps = {
   children: React.ReactNode;
+  navItems: NavItem[];
+  homeHref: string;
 };
 
-export function AppShell({ children }: AppShellProps) {
+export function AppShell({ children, navItems, homeHref }: AppShellProps) {
   return (
     <div className="flex min-h-full flex-1">
-      <Sidebar />
+      <Sidebar navItems={navItems} homeHref={homeHref} />
       <div className="flex min-w-0 flex-1 flex-col">
-        <Navbar />
-        <MobileNav />
+        <Navbar navItems={navItems} />
+        <MobileNav navItems={navItems} homeHref={homeHref} />
         <main className="flex flex-1 flex-col overflow-y-auto">
           <PageContainer>{children}</PageContainer>
         </main>

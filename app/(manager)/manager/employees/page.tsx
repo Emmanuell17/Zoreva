@@ -1,8 +1,8 @@
-export default function AvailabilityPage() {
+export default function ManagerEmployeesPage() {
   return (
     <div>
       <p className="text-sm text-zinc-400">
-        Employee availability will appear here.
+        All employees will be listed here.
       </p>
     </div>
   );

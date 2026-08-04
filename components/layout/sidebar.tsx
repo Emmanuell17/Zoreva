@@ -2,21 +2,21 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { isNavItemActive, type NavItem } from "@/lib/navigation";
 
-const navItems = [
-  { href: "/", label: "Dashboard" },
-  { href: "/availability", label: "Availability" },
-  { href: "/shifts", label: "Shifts" },
-] as const;
+type SidebarProps = {
+  navItems: NavItem[];
+  homeHref: string;
+};
 
-export function Sidebar() {
+export function Sidebar({ navItems, homeHref }: SidebarProps) {
   const pathname = usePathname();
 
   return (
     <aside className="hidden w-56 shrink-0 flex-col border-r border-zinc-800 bg-background md:flex">
       <div className="flex h-14 items-center border-b border-zinc-800 px-5">
         <Link
-          href="/"
+          href={homeHref}
           className="font-mono text-base font-semibold tracking-[0.2em] text-foreground uppercase"
         >
           Zoreva
@@ -24,10 +24,7 @@ export function Sidebar() {
       </div>
       <nav className="flex flex-1 flex-col gap-1 p-3" aria-label="Main">
         {navItems.map((item) => {
-          const isActive =
-            item.href === "/"
-              ? pathname === "/"
-              : pathname.startsWith(item.href);
+          const isActive = isNavItemActive(pathname, item.href, homeHref);
 
           return (
             <Link

@@ -2,14 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { isNavItemActive, type NavItem } from "@/lib/navigation";
 
-const navItems = [
-  { href: "/", label: "Dashboard" },
-  { href: "/availability", label: "Availability" },
-  { href: "/shifts", label: "Shifts" },
-] as const;
+type MobileNavProps = {
+  navItems: NavItem[];
+  homeHref: string;
+};
 
-export function MobileNav() {
+export function MobileNav({ navItems, homeHref }: MobileNavProps) {
   const pathname = usePathname();
 
   return (
@@ -18,10 +18,7 @@ export function MobileNav() {
       aria-label="Mobile"
     >
       {navItems.map((item) => {
-        const isActive =
-          item.href === "/"
-            ? pathname === "/"
-            : pathname.startsWith(item.href);
+        const isActive = isNavItemActive(pathname, item.href, homeHref);
 
         return (
           <Link

@@ -1,8 +1,8 @@
-export default function ShiftsPage() {
+export default function ManagerShiftsPage() {
   return (
     <div>
       <p className="text-sm text-zinc-400">
-        Shift schedule and coverage will appear here.
+        Create and manage shifts here.
       </p>
     </div>
   );

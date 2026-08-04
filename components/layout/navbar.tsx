@@ -1,16 +1,15 @@
 "use client";
 
 import { usePathname } from "next/navigation";
+import { getPageTitle, type NavItem } from "@/lib/navigation";
 
-const titles: Record<string, string> = {
-  "/": "Dashboard",
-  "/availability": "Availability",
-  "/shifts": "Shifts",
+type NavbarProps = {
+  navItems: NavItem[];
 };
 
-export function Navbar() {
+export function Navbar({ navItems }: NavbarProps) {
   const pathname = usePathname();
-  const title = titles[pathname] ?? "Zoreva";
+  const title = getPageTitle(pathname, navItems);
 
   return (
     <header className="flex h-14 shrink-0 items-center border-b border-zinc-800 bg-background px-4 sm:px-6">
