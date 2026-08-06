@@ -8,7 +8,7 @@ export default function AuthLayout({
   return (
     <div className="flex min-h-full flex-1 flex-col items-center justify-center px-4 py-12">
       <Link
-        href="/login"
+        href="/"
         className="font-mono text-lg font-semibold tracking-[0.2em] text-foreground uppercase"
       >
         Zoreva

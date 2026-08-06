@@ -14,7 +14,8 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Zoreva",
-  description: "Availability and shift coordination",
+  description:
+    "Availability and shift coordination for employees and managers.",
 };
 
 export default function RootLayout({
