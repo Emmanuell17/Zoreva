@@ -5,3 +5,9 @@ export function formatDate(date: Date): string {
     day: "numeric",
   });
 }
+
+export function cn(
+  ...classes: Array<string | false | null | undefined>
+): string {
+  return classes.filter(Boolean).join(" ");
+}
