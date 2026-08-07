@@ -8,12 +8,18 @@ type AppShellProps = {
   children: React.ReactNode;
   navItems: NavItem[];
   homeHref: string;
+  roleLabel: string;
 };
 
-export function AppShell({ children, navItems, homeHref }: AppShellProps) {
+export function AppShell({
+  children,
+  navItems,
+  homeHref,
+  roleLabel,
+}: AppShellProps) {
   return (
     <div className="flex min-h-full flex-1">
-      <Sidebar navItems={navItems} homeHref={homeHref} />
+      <Sidebar navItems={navItems} homeHref={homeHref} roleLabel={roleLabel} />
       <div className="flex min-w-0 flex-1 flex-col">
         <Navbar navItems={navItems} />
         <MobileNav navItems={navItems} homeHref={homeHref} />

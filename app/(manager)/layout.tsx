@@ -7,7 +7,7 @@ export default function ManagerLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <AppShell navItems={managerNav} homeHref="/manager">
+    <AppShell navItems={managerNav} homeHref="/manager" roleLabel="Manager">
       {children}
     </AppShell>
   );

@@ -7,9 +7,10 @@ import { isNavItemActive, type NavItem } from "@/lib/navigation";
 type SidebarProps = {
   navItems: NavItem[];
   homeHref: string;
+  roleLabel: string;
 };
 
-export function Sidebar({ navItems, homeHref }: SidebarProps) {
+export function Sidebar({ navItems, homeHref, roleLabel }: SidebarProps) {
   const pathname = usePathname();
 
   return (
@@ -42,7 +43,8 @@ export function Sidebar({ navItems, homeHref }: SidebarProps) {
         })}
       </nav>
       <div className="border-t border-zinc-800 p-4">
-        <p className="text-xs text-zinc-600">Shift coordination</p>
+        <p className="text-xs font-medium text-zinc-400">{roleLabel}</p>
+        <p className="mt-0.5 text-xs text-zinc-600">Shift coordination</p>
       </div>
     </aside>
   );
