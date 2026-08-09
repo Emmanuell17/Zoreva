@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { EmployeeShiftList } from "@/components/employee/employee-shift-list";
 import { PageHeader } from "@/components/layout/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -9,14 +10,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 
 export function EmployeeDashboard() {
   return (
@@ -41,37 +34,28 @@ export function EmployeeDashboard() {
       />
 
       <div className="grid gap-6">
-        <Card>
-          <CardHeader>
-            <CardTitle>Upcoming shifts</CardTitle>
-            <CardDescription>
-              Confirm or cancel shifts assigned to you.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="px-0 pb-0">
-            <Table>
-              <TableHeader>
-                <TableRow className="hover:bg-transparent">
-                  <TableHead>Date</TableHead>
-                  <TableHead>Time</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                <TableRow className="hover:bg-transparent">
-                  <TableCell
-                    colSpan={4}
-                    className="py-10 text-center text-zinc-500"
-                  >
-                    No upcoming shifts yet. When a manager assigns you, they
-                    will show up here.
-                  </TableCell>
-                </TableRow>
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
+        <section>
+          <div className="mb-3 flex items-end justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-medium tracking-tight text-foreground">
+                Upcoming shifts
+              </h3>
+              <p className="mt-1 text-xs text-zinc-500">
+                Confirm or cancel shifts assigned to you.
+              </p>
+            </div>
+            <Link
+              href="/employee/shifts"
+              className="text-xs text-zinc-400 transition-colors hover:text-foreground"
+            >
+              See all
+            </Link>
+          </div>
+          <EmployeeShiftList
+            limit={3}
+            emptyMessage="No upcoming shifts yet. When a manager assigns you, they will show up here."
+          />
+        </section>
 
         <Card>
           <CardHeader>
