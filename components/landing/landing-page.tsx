@@ -1,12 +1,12 @@
 import Link from "next/link";
 
 const shifts = [
-  { day: "Mon", label: "Morning", top: "18%", left: "8%", width: "18%" },
-  { day: "Tue", label: "Mid", top: "34%", left: "28%", width: "16%" },
-  { day: "Wed", label: "Close", top: "22%", left: "48%", width: "20%" },
-  { day: "Thu", label: "Open", top: "42%", left: "12%", width: "22%" },
-  { day: "Fri", label: "Cover", top: "28%", left: "62%", width: "18%" },
-  { day: "Sat", label: "Split", top: "48%", left: "40%", width: "24%" },
+  { day: "Mon", label: "Morning", top: "28%", left: "8%", width: "18%" },
+  { day: "Tue", label: "Mid", top: "44%", left: "28%", width: "16%" },
+  { day: "Wed", label: "Close", top: "32%", left: "48%", width: "20%" },
+  { day: "Thu", label: "Open", top: "52%", left: "12%", width: "22%" },
+  { day: "Fri", label: "Cover", top: "38%", left: "62%", width: "18%" },
+  { day: "Sat", label: "Split", top: "58%", left: "40%", width: "24%" },
 ];
 
 export function LandingPage() {
@@ -23,12 +23,12 @@ export function LandingPage() {
         />
         <div
           aria-hidden
-          className="animate-[soft-pulse_6s_ease-in-out_infinite] pointer-events-none absolute inset-x-0 bottom-0 h-[58%] bg-[linear-gradient(180deg,transparent,rgba(10,10,10,0.2)_20%,rgba(10,10,10,0.92))]"
+          className="animate-[soft-pulse_6s_ease-in-out_infinite] pointer-events-none absolute inset-x-0 bottom-0 h-[42%] bg-[linear-gradient(180deg,transparent,rgba(10,10,10,0.2)_20%,rgba(10,10,10,0.92))] sm:h-[44%]"
         />
 
         <div
           aria-hidden
-          className="pointer-events-none absolute inset-x-0 bottom-0 h-[52%] sm:h-[58%]"
+          className="pointer-events-none absolute inset-x-0 bottom-0 h-[38%] sm:h-[42%]"
         >
           <div className="absolute inset-0 border-t border-zinc-800/80 bg-zinc-950/40 backdrop-blur-[1px]">
             <div className="grid h-10 grid-cols-7 border-b border-zinc-800/80 text-[10px] uppercase tracking-[0.18em] text-zinc-600 sm:text-xs">
@@ -71,7 +71,7 @@ export function LandingPage() {
           </Link>
         </header>
 
-        <div className="relative z-10 flex flex-1 flex-col justify-center px-6 pb-40 pt-8 sm:px-10 sm:pb-52">
+        <div className="relative z-10 flex flex-1 flex-col justify-start px-6 pb-[44vh] pt-16 sm:px-10 sm:pb-[46vh] sm:pt-24">
           <p
             className="animate-[fade-up_0.75s_ease-out_both] font-mono text-4xl font-semibold tracking-[0.22em] text-foreground uppercase sm:text-5xl md:text-6xl"
           >
@@ -83,13 +83,13 @@ export function LandingPage() {
             Shift coordination that stays clear.
           </h1>
           <p
-            className="animate-[fade-up_0.75s_ease-out_0.22s_both] mt-4 max-w-md text-sm leading-relaxed text-zinc-400 sm:text-base"
+            className="animate-[fade-up_0.75s_ease-out_0.22s_both] mt-5 max-w-md text-sm leading-relaxed text-zinc-400 sm:mt-6 sm:text-base"
           >
             Employees share availability. Managers assign shifts. Everyone sees
             the same schedule.
           </p>
           <div
-            className="animate-[fade-up_0.75s_ease-out_0.34s_both] mt-8 flex flex-wrap items-center gap-3"
+            className="animate-[fade-up_0.75s_ease-out_0.34s_both] mt-10 flex flex-wrap items-center gap-3"
           >
             <Link
               href="/register"
