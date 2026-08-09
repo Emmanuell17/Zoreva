@@ -1,8 +1,10 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { CreateShiftForm } from "@/components/manager/create-shift-form";
 import { PageHeader } from "@/components/layout/page-header";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Table,
   TableBody,
@@ -34,9 +36,10 @@ const statusVariant: Record<
 };
 
 export function ManagerShiftsPanel() {
-  const [shifts] = useState<Shift[]>(() =>
+  const [shifts, setShifts] = useState<Shift[]>(() =>
     mockManagerShifts.map((shift) => ({ ...shift })),
   );
+  const [createOpen, setCreateOpen] = useState(false);
 
   const sortedShifts = useMemo(() => getManagerShifts(shifts), [shifts]);
   const pendingCount = sortedShifts.filter(
@@ -45,6 +48,10 @@ export function ManagerShiftsPanel() {
   const cancelledCount = sortedShifts.filter(
     (shift) => shift.status === "CANCELLED",
   ).length;
+
+  function handleCreate(shift: Shift) {
+    setShifts((current) => [...current, shift]);
+  }
 
   return (
     <div>
@@ -56,6 +63,9 @@ export function ManagerShiftsPanel() {
             <Badge variant="pending">{pendingCount} pending</Badge>
             <Badge variant="cancelled">{cancelledCount} cancelled</Badge>
             <Badge variant="default">{sortedShifts.length} total</Badge>
+            <Button size="sm" onClick={() => setCreateOpen(true)}>
+              Create shift
+            </Button>
           </div>
         }
       />
@@ -122,6 +132,12 @@ export function ManagerShiftsPanel() {
           )}
         </TableBody>
       </Table>
+
+      <CreateShiftForm
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        onCreate={handleCreate}
+      />
     </div>
   );
 }
