@@ -7,7 +7,12 @@ export default function EmployeeLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <AppShell navItems={employeeNav} homeHref="/employee" roleLabel="Employee">
+    <AppShell
+      navItems={employeeNav}
+      homeHref="/employee"
+      roleLabel="Employee"
+      showNotifications
+    >
       {children}
     </AppShell>
   );

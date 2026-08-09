@@ -7,6 +7,8 @@ export const employeeNav: NavItem[] = [
   { href: "/employee", label: "Dashboard" },
   { href: "/employee/availability", label: "Availability" },
   { href: "/employee/shifts", label: "Shifts" },
+  { href: "/employee/swaps", label: "Swaps" },
+  { href: "/employee/notifications", label: "Notifications" },
 ];
 
 export const managerNav: NavItem[] = [
