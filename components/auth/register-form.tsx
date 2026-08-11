@@ -6,6 +6,14 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import {
+  hasFieldErrors,
+  validateEmail,
+  validateName,
+  validatePassword,
+  validatePasswordMatch,
+  type FieldErrors,
+} from "@/lib/validation";
 import type { Role } from "@/types";
 
 const roles: { value: Role; label: string; description: string }[] = [
@@ -21,13 +29,75 @@ const roles: { value: Role; label: string; description: string }[] = [
   },
 ];
 
+type RegisterFields = "name" | "email" | "password" | "confirmPassword" | "role";
+
+type RegisterValues = {
+  name: string;
+  email: string;
+  password: string;
+  confirmPassword: string;
+  role: Role;
+};
+
+const initialValues: RegisterValues = {
+  name: "",
+  email: "",
+  password: "",
+  confirmPassword: "",
+  role: "EMPLOYEE",
+};
+
 export function RegisterForm() {
   const router = useRouter();
-  const [role, setRole] = useState<Role>("EMPLOYEE");
+  const [values, setValues] = useState<RegisterValues>(initialValues);
+  const [errors, setErrors] = useState<FieldErrors<RegisterFields>>({});
+  const [touched, setTouched] = useState<
+    Partial<Record<RegisterFields, boolean>>
+  >({});
+  const [submitting, setSubmitting] = useState(false);
 
-  function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+  function setField<K extends keyof RegisterValues>(
+    field: K,
+    value: RegisterValues[K],
+  ) {
+    const nextValues = { ...values, [field]: value };
+    setValues(nextValues);
+
+    if (touched[field as RegisterFields] || errors[field as RegisterFields]) {
+      setErrors(validateRegister(nextValues));
+    }
+  }
+
+  function validateRegister(nextValues: RegisterValues = values) {
+    return {
+      name: validateName(nextValues.name),
+      email: validateEmail(nextValues.email),
+      password: validatePassword(nextValues.password),
+      confirmPassword: validatePasswordMatch(
+        nextValues.password,
+        nextValues.confirmPassword,
+      ),
+      role: nextValues.role ? undefined : "Select a role.",
+    } satisfies FieldErrors<RegisterFields>;
+  }
+
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    router.push(role === "MANAGER" ? "/manager" : "/employee");
+    setTouched({
+      name: true,
+      email: true,
+      password: true,
+      confirmPassword: true,
+      role: true,
+    });
+
+    const nextErrors = validateRegister();
+    setErrors(nextErrors);
+    if (hasFieldErrors(nextErrors)) return;
+
+    setSubmitting(true);
+    await new Promise((resolve) => window.setTimeout(resolve, 500));
+    router.push(values.role === "MANAGER" ? "/manager" : "/employee");
   }
 
   return (
@@ -41,14 +111,24 @@ export function RegisterForm() {
         </p>
       </div>
 
-      <form onSubmit={handleSubmit} className="mt-8 flex flex-col gap-4">
+      <form
+        onSubmit={handleSubmit}
+        noValidate
+        className="mt-8 flex flex-col gap-4"
+      >
         <Input
           label="Name"
           name="name"
           type="text"
           autoComplete="name"
           placeholder="Alex Morgan"
-          required
+          value={values.name}
+          error={touched.name ? errors.name : undefined}
+          onChange={(event) => setField("name", event.target.value)}
+          onBlur={() => {
+            setTouched((current) => ({ ...current, name: true }));
+            setErrors(validateRegister());
+          }}
         />
         <Input
           label="Email"
@@ -56,7 +136,13 @@ export function RegisterForm() {
           type="email"
           autoComplete="email"
           placeholder="alex@company.com"
-          required
+          value={values.email}
+          error={touched.email ? errors.email : undefined}
+          onChange={(event) => setField("email", event.target.value)}
+          onBlur={() => {
+            setTouched((current) => ({ ...current, email: true }));
+            setErrors(validateRegister());
+          }}
         />
         <Input
           label="Password"
@@ -64,8 +150,13 @@ export function RegisterForm() {
           type="password"
           autoComplete="new-password"
           placeholder="At least 8 characters"
-          minLength={8}
-          required
+          value={values.password}
+          error={touched.password ? errors.password : undefined}
+          onChange={(event) => setField("password", event.target.value)}
+          onBlur={() => {
+            setTouched((current) => ({ ...current, password: true }));
+            setErrors(validateRegister());
+          }}
         />
         <Input
           label="Confirm password"
@@ -73,15 +164,20 @@ export function RegisterForm() {
           type="password"
           autoComplete="new-password"
           placeholder="Repeat your password"
-          minLength={8}
-          required
+          value={values.confirmPassword}
+          error={touched.confirmPassword ? errors.confirmPassword : undefined}
+          onChange={(event) => setField("confirmPassword", event.target.value)}
+          onBlur={() => {
+            setTouched((current) => ({ ...current, confirmPassword: true }));
+            setErrors(validateRegister());
+          }}
         />
 
         <fieldset className="flex flex-col gap-2 text-left">
           <legend className="text-xs font-medium text-zinc-400">Role</legend>
           <div className="grid gap-2">
             {roles.map((option) => {
-              const selected = role === option.value;
+              const selected = values.role === option.value;
 
               return (
                 <label
@@ -98,7 +194,7 @@ export function RegisterForm() {
                     name="role"
                     value={option.value}
                     checked={selected}
-                    onChange={() => setRole(option.value)}
+                    onChange={() => setField("role", option.value)}
                     className="sr-only"
                   />
                   <span className="block text-sm font-medium text-foreground">
@@ -111,10 +207,13 @@ export function RegisterForm() {
               );
             })}
           </div>
+          {touched.role && errors.role ? (
+            <p className="text-xs text-red-400">{errors.role}</p>
+          ) : null}
         </fieldset>
 
-        <Button type="submit" className="mt-2 w-full">
-          Create account
+        <Button type="submit" loading={submitting} className="mt-2 w-full">
+          {submitting ? "Creating account…" : "Create account"}
         </Button>
       </form>
 

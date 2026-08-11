@@ -36,11 +36,11 @@ export function ShiftCard({
     <Card
       className={cn(
         "overflow-hidden",
-        isCancelled && "border-zinc-800/80 opacity-70",
+        isCancelled && "opacity-70",
         className,
       )}
     >
-      <div className="flex items-start justify-between gap-3 px-4 py-3">
+      <div className="flex items-start justify-between gap-3 px-4 py-3.5">
         <div className="min-w-0">
           <p className="text-sm font-medium tracking-tight text-foreground">
             {formatDate(shift.date)}
@@ -61,8 +61,8 @@ export function ShiftCard({
       </div>
 
       {shift.note ? (
-        <CardContent className="border-t border-zinc-800 pt-3">
-          <p className="text-xs text-zinc-500">
+        <CardContent className="border-t border-border pt-3">
+          <p className="text-xs leading-relaxed text-zinc-500">
             <span className="text-zinc-400">Note: </span>
             {shift.note}
           </p>
@@ -70,7 +70,9 @@ export function ShiftCard({
       ) : null}
 
       {actions ? (
-        <CardFooter className="justify-end gap-2">{actions}</CardFooter>
+        <CardFooter className="justify-stretch gap-2 sm:justify-end [&>button]:flex-1 sm:[&>button]:flex-none">
+          {actions}
+        </CardFooter>
       ) : null}
     </Card>
   );

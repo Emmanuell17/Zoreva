@@ -1,4 +1,6 @@
+import Link from "next/link";
 import { PageHeader } from "@/components/layout/page-header";
+import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -6,6 +8,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { EmptyState } from "@/components/ui/empty-state";
 
 export function ManagerAvailabilityPanel() {
   return (
@@ -23,10 +26,19 @@ export function ManagerAvailabilityPanel() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <p className="py-6 text-center text-sm text-zinc-500">
-            Availability by employee will appear here once submissions are
-            connected.
-          </p>
+          <EmptyState
+            compact
+            className="px-0 py-4"
+            title="No availability submissions yet"
+            description="Once employees submit their weekly availability, it will appear here."
+            action={
+              <Link href="/manager/employees">
+                <Button size="sm" variant="secondary">
+                  View employees
+                </Button>
+              </Link>
+            }
+          />
         </CardContent>
       </Card>
     </div>

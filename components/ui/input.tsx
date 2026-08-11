@@ -33,7 +33,7 @@ export function Input({
           "placeholder:text-zinc-600",
           "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-zinc-500",
           "disabled:cursor-not-allowed disabled:opacity-50",
-          error ? "border-red-800" : "border-zinc-800",
+          error ? "border-red-800" : "border-border",
           className,
         )}
         aria-invalid={error ? true : undefined}

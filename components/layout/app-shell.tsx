@@ -20,10 +20,14 @@ export function AppShell({
   showNotifications = false,
 }: AppShellProps) {
   return (
-    <div className="flex min-h-full flex-1">
+    <div className="flex min-h-full flex-1 pb-[env(safe-area-inset-bottom)]">
       <Sidebar navItems={navItems} homeHref={homeHref} roleLabel={roleLabel} />
       <div className="flex min-w-0 flex-1 flex-col">
-        <Navbar navItems={navItems} showNotifications={showNotifications} />
+        <Navbar
+          navItems={navItems}
+          homeHref={homeHref}
+          showNotifications={showNotifications}
+        />
         <MobileNav navItems={navItems} homeHref={homeHref} />
         <main className="flex flex-1 flex-col overflow-y-auto">
           <PageContainer>{children}</PageContainer>

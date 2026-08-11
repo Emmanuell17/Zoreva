@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { EmployeeShiftList } from "@/components/employee/employee-shift-list";
 import { PageHeader } from "@/components/layout/page-header";
-import { Badge } from "@/components/ui/badge";
+import { SectionHeader } from "@/components/layout/section-header";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -10,6 +10,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { EmptyState } from "@/components/ui/empty-state";
 
 export function EmployeeDashboard() {
   return (
@@ -18,66 +19,61 @@ export function EmployeeDashboard() {
         title="Overview"
         description="Your upcoming shifts and availability at a glance."
         actions={
-          <>
-            <Link href="/employee/availability">
-              <Button variant="secondary" size="sm">
+          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+            <Link href="/employee/availability" className="w-full sm:w-auto">
+              <Button variant="secondary" size="sm" className="w-full sm:w-auto">
                 Update availability
               </Button>
             </Link>
-            <Link href="/employee/shifts">
-              <Button variant="ghost" size="sm">
+            <Link href="/employee/shifts" className="w-full sm:w-auto">
+              <Button variant="ghost" size="sm" className="w-full sm:w-auto">
                 View all shifts
               </Button>
             </Link>
-          </>
+          </div>
         }
       />
 
-      <div className="grid gap-6">
+      <div className="grid gap-8">
         <section>
-          <div className="mb-3 flex items-end justify-between gap-3">
-            <div>
-              <h3 className="text-sm font-medium tracking-tight text-foreground">
-                Upcoming shifts
-              </h3>
-              <p className="mt-1 text-xs text-zinc-500">
-                Confirm or cancel shifts assigned to you.
-              </p>
-            </div>
-            <Link
-              href="/employee/shifts"
-              className="text-xs text-zinc-400 transition-colors hover:text-foreground"
-            >
-              See all
-            </Link>
-          </div>
+          <SectionHeader
+            title="Upcoming shifts"
+            description="Confirm or cancel shifts assigned to you."
+            action={
+              <Link
+                href="/employee/shifts"
+                className="inline-flex min-h-9 items-center text-xs text-zinc-400 transition-colors hover:text-foreground"
+              >
+                See all
+              </Link>
+            }
+          />
           <EmployeeShiftList
             limit={3}
-            emptyMessage="No upcoming shifts yet. When a manager assigns you, they will show up here."
+            emptyMessage="No upcoming shifts yet"
+            emptyDescription="When a manager assigns you, they will show up here."
           />
         </section>
 
         <Card>
           <CardHeader>
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <CardTitle>Availability</CardTitle>
-                <CardDescription>
-                  Keep your open dates up to date so managers can plan coverage.
-                </CardDescription>
-              </div>
-              <Badge variant="default">Ready</Badge>
-            </div>
+            <CardTitle>Availability</CardTitle>
+            <CardDescription>
+              Keep your open dates up to date so managers can plan coverage.
+            </CardDescription>
           </CardHeader>
           <CardContent>
-            <p className="text-sm text-zinc-400">
-              You have not submitted availability for upcoming dates.
-            </p>
-            <div className="mt-4">
-              <Link href="/employee/availability">
-                <Button size="sm">Submit availability</Button>
-              </Link>
-            </div>
+            <EmptyState
+              compact
+              className="px-0 py-4"
+              title="No availability submitted"
+              description="Share your open dates so managers can plan coverage."
+              action={
+                <Link href="/employee/availability">
+                  <Button size="sm">Submit availability</Button>
+                </Link>
+              }
+            />
           </CardContent>
         </Card>
       </div>

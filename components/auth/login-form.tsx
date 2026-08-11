@@ -2,15 +2,65 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  hasFieldErrors,
+  validateEmail,
+  validatePassword,
+  type FieldErrors,
+} from "@/lib/validation";
+
+type LoginFields = "email" | "password";
+
+type LoginValues = Record<LoginFields, string>;
+
+const initialValues: LoginValues = {
+  email: "",
+  password: "",
+};
 
 export function LoginForm() {
   const router = useRouter();
+  const [values, setValues] = useState<LoginValues>(initialValues);
+  const [errors, setErrors] = useState<FieldErrors<LoginFields>>({});
+  const [touched, setTouched] = useState<Partial<Record<LoginFields, boolean>>>(
+    {},
+  );
+  const [submitting, setSubmitting] = useState(false);
 
-  function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+  function updateField(field: LoginFields, value: string) {
+    setValues((current) => ({ ...current, [field]: value }));
+    if (touched[field] || errors[field]) {
+      setErrors((current) => ({
+        ...current,
+        [field]:
+          field === "email"
+            ? validateEmail(value)
+            : validatePassword(value),
+      }));
+    }
+  }
+
+  function validateAll(nextValues: LoginValues = values) {
+    const nextErrors: FieldErrors<LoginFields> = {
+      email: validateEmail(nextValues.email),
+      password: validatePassword(nextValues.password),
+    };
+    setErrors(nextErrors);
+    return !hasFieldErrors(nextErrors);
+  }
+
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setTouched({ email: true, password: true });
+
+    if (!validateAll()) return;
+
+    setSubmitting(true);
     // Temporary until authentication is wired
+    await new Promise((resolve) => window.setTimeout(resolve, 500));
     router.push("/employee");
   }
 
@@ -25,14 +75,27 @@ export function LoginForm() {
         </p>
       </div>
 
-      <form onSubmit={handleSubmit} className="mt-8 flex flex-col gap-4">
+      <form
+        onSubmit={handleSubmit}
+        noValidate
+        className="mt-8 flex flex-col gap-4"
+      >
         <Input
           label="Email"
           name="email"
           type="email"
           autoComplete="email"
           placeholder="alex@company.com"
-          required
+          value={values.email}
+          error={touched.email ? errors.email : undefined}
+          onChange={(event) => updateField("email", event.target.value)}
+          onBlur={() => {
+            setTouched((current) => ({ ...current, email: true }));
+            setErrors((current) => ({
+              ...current,
+              email: validateEmail(values.email),
+            }));
+          }}
         />
         <Input
           label="Password"
@@ -40,11 +103,20 @@ export function LoginForm() {
           type="password"
           autoComplete="current-password"
           placeholder="Your password"
-          required
+          value={values.password}
+          error={touched.password ? errors.password : undefined}
+          onChange={(event) => updateField("password", event.target.value)}
+          onBlur={() => {
+            setTouched((current) => ({ ...current, password: true }));
+            setErrors((current) => ({
+              ...current,
+              password: validatePassword(values.password),
+            }));
+          }}
         />
 
-        <Button type="submit" className="mt-2 w-full">
-          Log in
+        <Button type="submit" loading={submitting} className="mt-2 w-full">
+          {submitting ? "Signing in…" : "Log in"}
         </Button>
       </form>
 

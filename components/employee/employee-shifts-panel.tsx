@@ -10,15 +10,18 @@ export function EmployeeShiftsPanel() {
         title="Shifts"
         description="Confirm, cancel, or request a swap for assigned shifts."
         actions={
-          <Link href="/employee/swaps">
-            <Button variant="secondary" size="sm">
+          <Link href="/employee/swaps" className="w-full sm:w-auto">
+            <Button variant="secondary" size="sm" className="w-full sm:w-auto">
               View swaps
             </Button>
           </Link>
         }
       />
 
-      <EmployeeShiftList emptyMessage="No shifts assigned yet." />
+      <EmployeeShiftList
+        emptyMessage="No shifts assigned yet"
+        emptyDescription="When a manager assigns you a shift, it will show up here."
+      />
     </div>
   );
 }

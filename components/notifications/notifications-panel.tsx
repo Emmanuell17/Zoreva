@@ -1,34 +1,33 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useSyncExternalStore } from "react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
-import { mockEmployeeNotifications } from "@/lib/mock-data";
+import { EmptyState } from "@/components/ui/empty-state";
+import { LoadingState } from "@/components/ui/loading-state";
 import { formatNotificationTime } from "@/lib/notifications";
+import {
+  getNotifications,
+  markAllNotificationsRead,
+  markNotificationRead,
+  subscribeNotifications,
+} from "@/lib/services";
 import { cn } from "@/lib/utils";
-import type { AppNotification } from "@/types";
+import { useInitialLoading } from "@/hooks/use-initial-loading";
+
+function useNotifications() {
+  return useSyncExternalStore(
+    subscribeNotifications,
+    getNotifications,
+    getNotifications,
+  );
+}
 
 export function NotificationsPanel() {
-  const [notifications, setNotifications] = useState<AppNotification[]>(() =>
-    mockEmployeeNotifications.map((item) => ({ ...item })),
-  );
-
+  const loading = useInitialLoading();
+  const notifications = useNotifications();
   const unreadCount = notifications.filter((item) => !item.read).length;
-
-  function markAsRead(id: string) {
-    setNotifications((current) =>
-      current.map((item) =>
-        item.id === id ? { ...item, read: true } : item,
-      ),
-    );
-  }
-
-  function markAllAsRead() {
-    setNotifications((current) =>
-      current.map((item) => ({ ...item, read: true })),
-    );
-  }
 
   return (
     <div>
@@ -40,37 +39,40 @@ export function NotificationsPanel() {
             type="button"
             variant="secondary"
             size="sm"
-            disabled={unreadCount === 0}
-            onClick={markAllAsRead}
+            disabled={loading || unreadCount === 0}
+            onClick={markAllNotificationsRead}
           >
             Mark all read
           </Button>
         }
       />
 
-      <div className="rounded-md border border-zinc-800">
-        {notifications.length === 0 ? (
-          <p className="px-4 py-10 text-center text-sm text-zinc-500">
-            No notifications yet.
-          </p>
+      <div className="rounded-md border border-border bg-surface">
+        {loading ? (
+          <LoadingState variant="list" rows={4} label="Loading notifications" />
+        ) : notifications.length === 0 ? (
+          <EmptyState
+            title="No notifications yet"
+            description="Updates about shifts, swaps, and availability will show up here."
+          />
         ) : (
-          <ul className="divide-y divide-zinc-800">
+          <ul className="divide-y divide-border">
             {notifications.map((notification) => (
               <li key={notification.id}>
                 <Link
                   href={notification.href ?? "/employee"}
-                  onClick={() => markAsRead(notification.id)}
+                  onClick={() => markNotificationRead(notification.id)}
                   className={cn(
-                    "block px-4 py-4 transition-colors hover:bg-zinc-900/50",
-                    !notification.read && "bg-zinc-950/80",
+                    "block px-4 py-3.5 transition-colors hover:bg-zinc-900/40",
+                    !notification.read && "bg-zinc-950/50",
                   )}
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <p className="text-sm font-medium text-foreground">
+                      <p className="text-sm font-medium tracking-tight text-foreground">
                         {notification.title}
                       </p>
-                      <p className="mt-1 text-sm leading-relaxed text-zinc-400">
+                      <p className="mt-1 text-xs leading-relaxed text-zinc-400">
                         {notification.body}
                       </p>
                       <p className="mt-2 text-xs text-zinc-600">

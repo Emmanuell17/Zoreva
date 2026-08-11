@@ -1,43 +1,48 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { ShiftSwapForm } from "@/components/employee/shift-swap-form";
 import { ShiftCardList } from "@/components/shifts/shift-card-list";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
 import {
-  getUpcomingEmployeeShifts,
-  mockEmployeeShifts,
-} from "@/lib/mock-data";
-import { addSwapRequest } from "@/lib/swap-store";
+  addSwapRequest,
+  getEmployeeShifts,
+  subscribeShifts,
+  updateShiftStatus,
+} from "@/lib/services";
+import { useInitialLoading } from "@/hooks/use-initial-loading";
 import type { Shift, ShiftSwapRequest } from "@/types";
 
 type EmployeeShiftListProps = {
   limit?: number;
   emptyMessage?: string;
+  emptyDescription?: string;
 };
+
+function useEmployeeShifts(limit?: number) {
+  return useSyncExternalStore(
+    subscribeShifts,
+    () => getEmployeeShifts(undefined, limit),
+    () => getEmployeeShifts(undefined, limit),
+  );
+}
 
 export function EmployeeShiftList({
   limit,
   emptyMessage = "No shifts assigned yet.",
+  emptyDescription,
 }: EmployeeShiftListProps) {
-  const [shifts, setShifts] = useState<Shift[]>(() =>
-    mockEmployeeShifts.map((shift) => ({ ...shift })),
-  );
+  const loading = useInitialLoading();
+  const visibleShifts = useEmployeeShifts(limit);
   const [cancelTarget, setCancelTarget] = useState<Shift | null>(null);
   const [cancelNote, setCancelNote] = useState("");
   const [swapTarget, setSwapTarget] = useState<Shift | null>(null);
   const [swapMessage, setSwapMessage] = useState<string | null>(null);
 
-  const visibleShifts = getUpcomingEmployeeShifts(shifts, limit);
-
   function confirmShift(shiftId: string) {
-    setShifts((current) =>
-      current.map((shift) =>
-        shift.id === shiftId ? { ...shift, status: "CONFIRMED" } : shift,
-      ),
-    );
+    updateShiftStatus(shiftId, "CONFIRMED");
   }
 
   function openCancel(shift: Shift) {
@@ -54,17 +59,10 @@ export function EmployeeShiftList({
     if (!cancelTarget) return;
 
     const note = cancelNote.trim();
-
-    setShifts((current) =>
-      current.map((shift) =>
-        shift.id === cancelTarget.id
-          ? {
-              ...shift,
-              status: "CANCELLED",
-              note: note.length > 0 ? note : shift.note,
-            }
-          : shift,
-      ),
+    updateShiftStatus(
+      cancelTarget.id,
+      "CANCELLED",
+      note.length > 0 ? note : cancelTarget.note,
     );
     closeCancel();
   }
@@ -82,7 +80,9 @@ export function EmployeeShiftList({
 
       <ShiftCardList
         shifts={visibleShifts}
+        loading={loading}
         emptyMessage={emptyMessage}
+        emptyDescription={emptyDescription}
         renderActions={(shift) => {
           if (shift.status === "CANCELLED") return null;
 

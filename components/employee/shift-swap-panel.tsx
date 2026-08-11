@@ -5,19 +5,19 @@ import { ShiftSwapForm } from "@/components/employee/shift-swap-form";
 import { PageHeader } from "@/components/layout/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  getManagerShifts,
-  getUserName,
-  mockEmployeeShifts,
-  mockManagerShifts,
-} from "@/lib/mock-data";
+import { EmptyState } from "@/components/ui/empty-state";
+import { LoadingState } from "@/components/ui/loading-state";
 import {
   addSwapRequest,
+  getEmployeeName,
+  getEmployeeShifts,
+  getShiftById,
   getSwapRequests,
   subscribeSwapRequests,
   updateSwapRequestStatus,
-} from "@/lib/swap-store";
+} from "@/lib/services";
 import { formatDate, formatTimeRange } from "@/lib/utils";
+import { useInitialLoading } from "@/hooks/use-initial-loading";
 import type { Shift, ShiftSwapRequest, SwapRequestStatus } from "@/types";
 
 const statusVariant: Record<
@@ -33,18 +33,14 @@ const statusVariant: Record<
 function statusLabel(status: SwapRequestStatus): string {
   switch (status) {
     case "PENDING":
-      return "Pending";
+      return "Pending review";
     case "ACCEPTED":
-      return "Accepted";
+      return "Approved";
     case "DECLINED":
-      return "Declined";
+      return "Rejected";
     case "CANCELLED":
-      return "Cancelled";
+      return "Withdrawn";
   }
-}
-
-function findShift(shiftId: string, shifts: Shift[]): Shift | undefined {
-  return shifts.find((shift) => shift.id === shiftId);
 }
 
 function useSwapRequests() {
@@ -56,13 +52,10 @@ function useSwapRequests() {
 }
 
 export function ShiftSwapPanel() {
+  const loading = useInitialLoading();
   const requests = useSwapRequests();
   const [swapShift, setSwapShift] = useState<Shift | null>(null);
-  const allShifts = getManagerShifts([
-    ...mockManagerShifts,
-    ...mockEmployeeShifts,
-  ]);
-  const myShifts = mockEmployeeShifts.filter(
+  const myShifts = getEmployeeShifts().filter(
     (shift) => shift.status === "PENDING" || shift.status === "CONFIRMED",
   );
 
@@ -78,7 +71,8 @@ export function ShiftSwapPanel() {
         actions={
           <Button
             size="sm"
-            disabled={myShifts.length === 0}
+            className="w-full sm:w-auto"
+            disabled={loading || myShifts.length === 0}
             onClick={() => setSwapShift(myShifts[0] ?? null)}
           >
             New swap request
@@ -87,24 +81,39 @@ export function ShiftSwapPanel() {
       />
 
       <div className="grid gap-6">
-        <section className="rounded-md border border-zinc-800">
-          <div className="border-b border-zinc-800 px-4 py-3">
-            <h3 className="text-sm font-medium text-foreground">Your requests</h3>
-            <p className="mt-0.5 text-xs text-zinc-500">
+        <section className="rounded-md border border-border bg-surface">
+          <div className="border-b border-border px-4 py-3.5">
+            <h3 className="text-sm font-medium tracking-tight text-foreground">
+              Your requests
+            </h3>
+            <p className="mt-0.5 text-xs leading-relaxed text-zinc-500">
               Frontend-only workflow — statuses update in this session.
             </p>
           </div>
 
-          {requests.length === 0 ? (
-            <p className="px-4 py-10 text-center text-sm text-zinc-500">
-              No swap requests yet.
-            </p>
+          {loading ? (
+            <LoadingState variant="list" rows={3} label="Loading swap requests" />
+          ) : requests.length === 0 ? (
+            <EmptyState
+              title="No swap requests yet"
+              description="Request a trade with a teammate when you need coverage."
+              action={
+                myShifts.length > 0 ? (
+                  <Button
+                    size="sm"
+                    onClick={() => setSwapShift(myShifts[0] ?? null)}
+                  >
+                    New swap request
+                  </Button>
+                ) : undefined
+              }
+            />
           ) : (
             <ul className="divide-y divide-zinc-800">
               {requests.map((request) => {
-                const fromShift = findShift(request.fromShiftId, allShifts);
+                const fromShift = getShiftById(request.fromShiftId);
                 const toShift = request.toShiftId
-                  ? findShift(request.toShiftId, allShifts)
+                  ? getShiftById(request.toShiftId)
                   : undefined;
 
                 return (
@@ -113,7 +122,7 @@ export function ShiftSwapPanel() {
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
                           <p className="text-sm font-medium text-foreground">
-                            Swap with {getUserName(request.toEmployeeId)}
+                            Swap with {getEmployeeName(request.toEmployeeId)}
                           </p>
                           <Badge variant={statusVariant[request.status]}>
                             {statusLabel(request.status)}
@@ -121,7 +130,7 @@ export function ShiftSwapPanel() {
                         </div>
 
                         <div className="mt-3 grid gap-2 text-xs text-zinc-400 sm:grid-cols-2">
-                          <div className="rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2">
+                          <div className="rounded-md border border-border bg-zinc-950/70 px-3 py-2.5">
                             <p className="text-zinc-500">You give</p>
                             <p className="mt-1 text-foreground">
                               {fromShift
@@ -129,7 +138,7 @@ export function ShiftSwapPanel() {
                                 : "Shift unavailable"}
                             </p>
                           </div>
-                          <div className="rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2">
+                          <div className="rounded-md border border-border bg-zinc-950/70 px-3 py-2.5">
                             <p className="text-zinc-500">You want</p>
                             <p className="mt-1 text-foreground">
                               {toShift
@@ -147,16 +156,10 @@ export function ShiftSwapPanel() {
                       </div>
 
                       {request.status === "PENDING" ? (
-                        <div className="flex shrink-0 flex-wrap gap-2">
-                          <Button
-                            size="sm"
-                            variant="secondary"
-                            onClick={() =>
-                              updateSwapRequestStatus(request.id, "ACCEPTED")
-                            }
-                          >
-                            Mark accepted
-                          </Button>
+                        <div className="flex shrink-0 flex-col items-start gap-2 sm:items-end">
+                          <p className="text-xs text-zinc-500">
+                            Waiting for manager approval
+                          </p>
                           <Button
                             size="sm"
                             variant="ghost"

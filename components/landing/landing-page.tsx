@@ -23,25 +23,26 @@ export function LandingPage() {
         />
         <div
           aria-hidden
-          className="animate-[soft-pulse_6s_ease-in-out_infinite] pointer-events-none absolute inset-x-0 bottom-0 h-[42%] bg-[linear-gradient(180deg,transparent,rgba(10,10,10,0.2)_20%,rgba(10,10,10,0.92))] sm:h-[44%]"
+          className="animate-[soft-pulse_6s_ease-in-out_infinite] pointer-events-none absolute inset-x-0 bottom-0 h-[36%] bg-[linear-gradient(180deg,transparent,rgba(10,10,10,0.2)_20%,rgba(10,10,10,0.92))] sm:h-[42%]"
         />
 
         <div
           aria-hidden
-          className="pointer-events-none absolute inset-x-0 bottom-0 h-[38%] sm:h-[42%]"
+          className="pointer-events-none absolute inset-x-0 bottom-0 h-[34%] sm:h-[42%]"
         >
           <div className="absolute inset-0 border-t border-zinc-800/80 bg-zinc-950/40 backdrop-blur-[1px]">
-            <div className="grid h-10 grid-cols-7 border-b border-zinc-800/80 text-[10px] uppercase tracking-[0.18em] text-zinc-600 sm:text-xs">
+            <div className="grid h-9 grid-cols-7 border-b border-zinc-800/80 text-[9px] uppercase tracking-[0.14em] text-zinc-600 sm:h-10 sm:text-xs sm:tracking-[0.18em]">
               {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((day) => (
                 <div
                   key={day}
                   className="flex items-center justify-center border-r border-zinc-800/60 last:border-r-0"
                 >
-                  {day}
+                  <span className="sm:hidden">{day.slice(0, 1)}</span>
+                  <span className="hidden sm:inline">{day}</span>
                 </div>
               ))}
             </div>
-            <div className="relative h-[calc(100%-2.5rem)]">
+            <div className="relative hidden h-[calc(100%-2.5rem)] sm:block">
               {shifts.map((shift) => (
                 <div
                   key={`${shift.day}-${shift.label}`}
@@ -59,47 +60,52 @@ export function LandingPage() {
                 </div>
               ))}
             </div>
+            <div className="relative grid h-[calc(100%-2.25rem)] grid-cols-3 gap-2 p-3 sm:hidden">
+              {shifts.slice(0, 3).map((shift) => (
+                <div
+                  key={`mobile-${shift.day}-${shift.label}`}
+                  className="rounded-sm border border-zinc-700/70 bg-zinc-900/80 px-2 py-2 text-[10px] text-zinc-400"
+                >
+                  <span className="block font-medium text-zinc-300">
+                    {shift.label}
+                  </span>
+                  <span className="text-zinc-600">{shift.day}</span>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
 
-        <header className="relative z-10 flex items-center justify-end px-6 py-5 sm:px-10">
+        <header className="relative z-10 flex items-center justify-end px-5 py-5 sm:px-10">
           <Link
             href="/login"
-            className="text-sm text-zinc-400 transition-colors hover:text-foreground"
+            className="inline-flex min-h-10 items-center text-sm text-zinc-400 transition-colors hover:text-foreground"
           >
             Log in
           </Link>
         </header>
 
-        <div className="relative z-10 flex flex-1 flex-col justify-start px-6 pb-[44vh] pt-16 sm:px-10 sm:pb-[46vh] sm:pt-24">
-          <p
-            className="animate-[fade-up_0.75s_ease-out_both] font-mono text-4xl font-semibold tracking-[0.22em] text-foreground uppercase sm:text-5xl md:text-6xl"
-          >
+        <div className="relative z-10 flex flex-1 flex-col justify-start px-5 pb-[38vh] pt-12 sm:px-10 sm:pb-[46vh] sm:pt-24">
+          <p className="animate-[fade-up_0.75s_ease-out_both] font-mono text-[2rem] font-semibold tracking-[0.14em] text-foreground uppercase sm:text-5xl sm:tracking-[0.22em] md:text-6xl">
             Zoreva
           </p>
-          <h1
-            className="animate-[fade-up_0.75s_ease-out_0.12s_both] mt-6 max-w-xl text-2xl font-medium tracking-tight text-zinc-100 sm:text-3xl"
-          >
+          <h1 className="animate-[fade-up_0.75s_ease-out_0.12s_both] mt-5 max-w-xl text-xl font-medium tracking-tight text-zinc-100 sm:mt-6 sm:text-3xl">
             Shift coordination that stays clear.
           </h1>
-          <p
-            className="animate-[fade-up_0.75s_ease-out_0.22s_both] mt-5 max-w-md text-sm leading-relaxed text-zinc-400 sm:mt-6 sm:text-base"
-          >
+          <p className="animate-[fade-up_0.75s_ease-out_0.22s_both] mt-4 max-w-md text-sm leading-relaxed text-zinc-400 sm:mt-6 sm:text-base">
             Employees share availability. Managers assign shifts. Everyone sees
             the same schedule.
           </p>
-          <div
-            className="animate-[fade-up_0.75s_ease-out_0.34s_both] mt-10 flex flex-wrap items-center gap-3"
-          >
+          <div className="animate-[fade-up_0.75s_ease-out_0.34s_both] mt-8 flex w-full flex-col gap-3 sm:mt-10 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center">
             <Link
               href="/register"
-              className="inline-flex h-11 items-center justify-center rounded-md bg-foreground px-5 text-sm font-medium text-background transition-colors hover:bg-zinc-200"
+              className="inline-flex h-11 w-full items-center justify-center rounded-md bg-foreground px-5 text-sm font-medium text-background transition-colors hover:bg-zinc-200 sm:w-auto"
             >
               Get started
             </Link>
             <Link
               href="/login"
-              className="inline-flex h-11 items-center justify-center rounded-md border border-zinc-700 px-5 text-sm font-medium text-foreground transition-colors hover:bg-zinc-900"
+              className="inline-flex h-11 w-full items-center justify-center rounded-md border border-zinc-700 px-5 text-sm font-medium text-foreground transition-colors hover:bg-zinc-900 sm:w-auto"
             >
               Log in
             </Link>
@@ -107,7 +113,7 @@ export function LandingPage() {
         </div>
       </section>
 
-      <section className="border-t border-zinc-800 px-6 py-24 sm:px-10">
+      <section className="border-t border-zinc-800 px-5 py-16 sm:px-10 sm:py-24">
         <div className="mx-auto max-w-3xl">
           <h2 className="text-2xl font-medium tracking-tight text-foreground sm:text-3xl">
             Built for the week ahead.
@@ -120,8 +126,8 @@ export function LandingPage() {
         </div>
       </section>
 
-      <section className="border-t border-zinc-800 px-6 py-24 sm:px-10">
-        <div className="mx-auto grid max-w-3xl gap-16 sm:grid-cols-2 sm:gap-12">
+      <section className="border-t border-zinc-800 px-5 py-16 sm:px-10 sm:py-24">
+        <div className="mx-auto grid max-w-3xl gap-10 sm:grid-cols-2 sm:gap-12">
           <div>
             <h2 className="text-xl font-medium tracking-tight text-foreground">
               For employees
@@ -143,7 +149,7 @@ export function LandingPage() {
         </div>
       </section>
 
-      <section className="border-t border-zinc-800 px-6 py-24 sm:px-10">
+      <section className="border-t border-zinc-800 px-5 py-16 sm:px-10 sm:py-24">
         <div className="mx-auto max-w-3xl">
           <h2 className="text-2xl font-medium tracking-tight text-foreground sm:text-3xl">
             Start coordinating today.
@@ -154,7 +160,7 @@ export function LandingPage() {
           <div className="mt-8">
             <Link
               href="/register"
-              className="inline-flex h-11 items-center justify-center rounded-md bg-foreground px-5 text-sm font-medium text-background transition-colors hover:bg-zinc-200"
+              className="inline-flex h-11 w-full items-center justify-center rounded-md bg-foreground px-5 text-sm font-medium text-background transition-colors hover:bg-zinc-200 sm:w-auto"
             >
               Create account
             </Link>
@@ -162,12 +168,14 @@ export function LandingPage() {
         </div>
       </section>
 
-      <footer className="border-t border-zinc-800 px-6 py-8 sm:px-10">
-        <div className="mx-auto flex max-w-3xl items-center justify-between gap-4">
+      <footer className="border-t border-zinc-800 px-5 py-8 sm:px-10">
+        <div className="mx-auto flex max-w-3xl flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
           <p className="font-mono text-xs tracking-[0.2em] text-zinc-600 uppercase">
             Zoreva
           </p>
-          <p className="text-xs text-zinc-600">Availability and shift coordination</p>
+          <p className="text-xs text-zinc-600">
+            Availability and shift coordination
+          </p>
         </div>
       </footer>
     </div>

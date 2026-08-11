@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import {
   addDays,
@@ -12,6 +13,7 @@ import {
   toDateKey,
 } from "@/lib/availability";
 import { cn, formatDate } from "@/lib/utils";
+import { validateOptionalNote } from "@/lib/validation";
 import type { Availability } from "@/types";
 
 type DayDraft = {
@@ -38,6 +40,8 @@ export function AvailabilityForm() {
   );
   const [submitted, setSubmitted] = useState<Availability[]>([]);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [noteErrors, setNoteErrors] = useState<Record<string, string>>({});
+  const [formError, setFormError] = useState<string | null>(null);
 
   const weekKey = toDateKey(weekStart);
   const weekDates = useMemo(() => getWeekDates(weekStart), [weekStart]);
@@ -56,6 +60,8 @@ export function AvailabilityForm() {
     ensureDraft(next);
     setWeekStart(next);
     setStatusMessage(null);
+    setFormError(null);
+    setNoteErrors({});
   }
 
   function updateDay(
@@ -72,10 +78,34 @@ export function AvailabilityForm() {
       };
     });
     setStatusMessage(null);
+    setFormError(null);
+
+    if (patch.note !== undefined) {
+      const noteError = validateOptionalNote(patch.note);
+      setNoteErrors((current) => {
+        const next = { ...current };
+        if (noteError) next[dateKey] = noteError;
+        else delete next[dateKey];
+        return next;
+      });
+    }
   }
 
   function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+
+    const nextNoteErrors: Record<string, string> = {};
+    for (const day of draft) {
+      const noteError = validateOptionalNote(day.note);
+      if (noteError) nextNoteErrors[day.dateKey] = noteError;
+    }
+
+    setNoteErrors(nextNoteErrors);
+    if (Object.keys(nextNoteErrors).length > 0) {
+      setFormError("Fix the note errors before saving.");
+      setStatusMessage(null);
+      return;
+    }
 
     const entries: Availability[] = draft.map((day) => ({
       id: `avail_${day.dateKey}`,
@@ -95,6 +125,7 @@ export function AvailabilityForm() {
       );
     });
 
+    setFormError(null);
     setStatusMessage(`Availability saved for ${formatWeekRange(weekStart)}.`);
   }
 
@@ -106,22 +137,24 @@ export function AvailabilityForm() {
     <div className="grid gap-6">
       <form
         onSubmit={handleSubmit}
-        className="rounded-md border border-zinc-800 bg-surface"
+        noValidate
+        className="rounded-md border border-border bg-surface"
       >
-        <div className="flex flex-col gap-3 border-b border-zinc-800 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-3 border-b border-border px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h3 className="text-sm font-medium tracking-tight text-foreground">
               Weekly availability
             </h3>
-            <p className="mt-0.5 text-xs text-zinc-500">
+            <p className="mt-0.5 text-xs leading-relaxed text-zinc-500">
               {formatWeekRange(weekStart)}
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="grid grid-cols-3 gap-2 sm:flex sm:items-center">
             <Button
               type="button"
               variant="ghost"
               size="sm"
+              className="w-full sm:w-auto"
               onClick={() => goToWeek(-1)}
             >
               Previous
@@ -130,11 +163,14 @@ export function AvailabilityForm() {
               type="button"
               variant="secondary"
               size="sm"
+              className="w-full sm:w-auto"
               onClick={() => {
                 const todayWeek = startOfWeek();
                 ensureDraft(todayWeek);
                 setWeekStart(todayWeek);
                 setStatusMessage(null);
+                setFormError(null);
+                setNoteErrors({});
               }}
             >
               This week
@@ -143,6 +179,7 @@ export function AvailabilityForm() {
               type="button"
               variant="ghost"
               size="sm"
+              className="w-full sm:w-auto"
               onClick={() => goToWeek(1)}
             >
               Next
@@ -150,7 +187,7 @@ export function AvailabilityForm() {
           </div>
         </div>
 
-        <div className="divide-y divide-zinc-800">
+        <div className="divide-y divide-border">
           {weekDates.map((date, index) => {
             const day = draft[index];
             const dateKey = day.dateKey;
@@ -158,7 +195,7 @@ export function AvailabilityForm() {
             return (
               <div
                 key={dateKey}
-                className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-start sm:justify-between"
+                className="flex flex-col gap-3 px-4 py-3.5 sm:flex-row sm:items-start sm:justify-between"
               >
                 <div className="min-w-40">
                   <p className="text-sm font-medium text-foreground">
@@ -180,7 +217,7 @@ export function AvailabilityForm() {
                         "rounded-md border px-3 py-2 text-sm transition-colors",
                         day.available
                           ? "border-zinc-500 bg-zinc-900 text-foreground"
-                          : "border-zinc-800 text-zinc-400 hover:border-zinc-700 hover:text-foreground",
+                          : "border-border text-zinc-400 hover:border-zinc-700 hover:text-foreground",
                       )}
                     >
                       Available
@@ -192,7 +229,7 @@ export function AvailabilityForm() {
                         "rounded-md border px-3 py-2 text-sm transition-colors",
                         !day.available
                           ? "border-zinc-500 bg-zinc-900 text-foreground"
-                          : "border-zinc-800 text-zinc-400 hover:border-zinc-700 hover:text-foreground",
+                          : "border-border text-zinc-400 hover:border-zinc-700 hover:text-foreground",
                       )}
                     >
                       Unavailable
@@ -202,6 +239,7 @@ export function AvailabilityForm() {
                     label="Note (optional)"
                     name={`note-${dateKey}`}
                     value={day.note}
+                    error={noteErrors[dateKey]}
                     onChange={(event) =>
                       updateDay(dateKey, { note: event.target.value })
                     }
@@ -213,35 +251,42 @@ export function AvailabilityForm() {
           })}
         </div>
 
-        <div className="flex flex-col gap-3 border-t border-zinc-800 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-          {statusMessage ? (
+        <div className="flex flex-col gap-3 border-t border-border px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between">
+          {formError ? (
+            <p className="text-xs text-red-400">{formError}</p>
+          ) : statusMessage ? (
             <p className="text-xs text-emerald-300">{statusMessage}</p>
           ) : (
             <p className="text-xs text-zinc-600">
               Frontend only — changes stay in this session.
             </p>
           )}
-          <Button type="submit" className="sm:w-auto">
+          <Button type="submit" className="w-full sm:w-auto">
             Save availability
           </Button>
         </div>
       </form>
 
-      {submittedThisWeek.length > 0 ? (
-        <div className="rounded-md border border-zinc-800">
-          <div className="border-b border-zinc-800 px-4 py-3">
-            <h3 className="text-sm font-medium tracking-tight text-foreground">
-              Submitted this week
-            </h3>
-            <p className="mt-0.5 text-xs text-zinc-500">
-              Summary of what managers will see for this week.
-            </p>
-          </div>
-          <ul className="divide-y divide-zinc-800">
+      <div className="rounded-md border border-border bg-surface">
+        <div className="border-b border-border px-4 py-3.5">
+          <h3 className="text-sm font-medium tracking-tight text-foreground">
+            Submitted this week
+          </h3>
+          <p className="mt-0.5 text-xs leading-relaxed text-zinc-500">
+            Summary of what managers will see for this week.
+          </p>
+        </div>
+        {submittedThisWeek.length === 0 ? (
+          <EmptyState
+            title="Nothing submitted for this week yet"
+            description="Save the form above to create a summary managers can review."
+          />
+        ) : (
+          <ul className="divide-y divide-border">
             {submittedThisWeek.map((entry) => (
               <li
                 key={entry.id}
-                className="flex items-start justify-between gap-3 px-4 py-3"
+                className="flex items-start justify-between gap-3 px-4 py-3.5"
               >
                 <div>
                   <p className="text-sm text-foreground">
@@ -262,8 +307,8 @@ export function AvailabilityForm() {
               </li>
             ))}
           </ul>
-        </div>
-      ) : null}
+        )}
+      </div>
     </div>
   );
 }

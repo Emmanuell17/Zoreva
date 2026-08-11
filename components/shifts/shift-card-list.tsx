@@ -1,9 +1,13 @@
+import { EmptyState } from "@/components/ui/empty-state";
+import { LoadingState } from "@/components/ui/loading-state";
 import { ShiftCard } from "@/components/shifts/shift-card";
 import type { Shift } from "@/types";
 
 type ShiftCardListProps = {
   shifts: Shift[];
   emptyMessage?: string;
+  emptyDescription?: string;
+  loading?: boolean;
   getEmployeeName?: (employeeId: string) => string | undefined;
   renderActions?: (shift: Shift) => React.ReactNode;
 };
@@ -11,13 +15,19 @@ type ShiftCardListProps = {
 export function ShiftCardList({
   shifts,
   emptyMessage = "No shifts to show.",
+  emptyDescription,
+  loading = false,
   getEmployeeName,
   renderActions,
 }: ShiftCardListProps) {
+  if (loading) {
+    return <LoadingState variant="cards" rows={3} label="Loading shifts" />;
+  }
+
   if (shifts.length === 0) {
     return (
-      <div className="rounded-md border border-zinc-800 px-4 py-10 text-center text-sm text-zinc-500">
-        {emptyMessage}
+      <div className="rounded-md border border-border bg-surface">
+        <EmptyState title={emptyMessage} description={emptyDescription} />
       </div>
     );
   }
