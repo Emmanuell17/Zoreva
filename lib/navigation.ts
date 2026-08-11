@@ -16,6 +16,7 @@ export const managerNav: NavItem[] = [
   { href: "/manager/employees", label: "Employees" },
   { href: "/manager/availability", label: "Availability" },
   { href: "/manager/shifts", label: "Shifts" },
+  { href: "/manager/swaps", label: "Swaps" },
 ];
 
 export function isNavItemActive(
