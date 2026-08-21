@@ -1,3 +1,4 @@
+import { RequireAuth } from "@/components/auth/require-auth";
 import { AppShell } from "@/components/layout/app-shell";
 import { managerNav } from "@/lib/navigation";
 
@@ -7,8 +8,10 @@ export default function ManagerLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <AppShell navItems={managerNav} homeHref="/manager" roleLabel="Manager">
-      {children}
-    </AppShell>
+    <RequireAuth allowedRole="MANAGER">
+      <AppShell navItems={managerNav} homeHref="/manager" roleLabel="Manager">
+        {children}
+      </AppShell>
+    </RequireAuth>
   );
 }

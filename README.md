@@ -63,11 +63,12 @@ Zoreva gives both roles one shared place to work from.
 | Language | **TypeScript** |
 | Styling | **Tailwind CSS 4** |
 | Fonts | Geist Sans / Geist Mono |
+| Auth | **Firebase Authentication** (Google sign-in) |
 | Demo data | In-memory mock services + `useSyncExternalStore` |
 
 Built without a third-party component library — UI primitives are custom and reusable.
 
-**Not used:** Angular, Vue, or a backend database in this MVP.
+**Not used:** Angular or Vue.
 
 ---
 
@@ -122,6 +123,33 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000).
 
+### Firebase Google auth setup
+
+1. Create a project in the [Firebase Console](https://console.firebase.google.com/)
+2. Add a **Web** app and copy the config values
+3. Enable **Authentication → Sign-in method → Google**
+4. Under Authentication → Settings → Authorized domains, add `localhost`
+5. Copy `.env.example` to `.env.local` and fill in:
+
+```bash
+cp .env.example .env.local
+```
+
+```bash
+NEXT_PUBLIC_FIREBASE_API_KEY=
+NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=
+NEXT_PUBLIC_FIREBASE_PROJECT_ID=
+NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=
+NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=
+NEXT_PUBLIC_FIREBASE_APP_ID=
+```
+
+6. Restart `npm run dev`
+7. On **Register**, pick Employee or Manager, then **Continue with Google**
+8. On **Log in**, use **Continue with Google**
+
+Role is stored locally after sign-in so the app can route to `/employee` or `/manager`. Without Firebase env vars, the UI still loads for local browsing.
+
 **Useful routes**
 
 | Path | What you’ll see |
@@ -143,12 +171,14 @@ npm run lint     # Lint
 
 ### Included in this MVP
 - Full employee and manager UI flows
+- Firebase Google authentication
 - Mock services for employees, shifts, swaps, and notifications
 - Validation, loading/empty states, and responsive polish
 
 ### Not included yet
-- Real authentication / authorization
+- Email/password Firebase auth
 - Persistent database or REST API
+- Server-side role storage (roles are local for now)
 - Email or push notification delivery
 
 ---

@@ -1,10 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { useAuth } from "@/components/auth/auth-provider";
+import { GoogleSignInButton } from "@/components/auth/google-sign-in-button";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  getAuthErrorMessage,
+  homePathForRole,
+} from "@/lib/firebase/auth";
 import { cn } from "@/lib/utils";
 import {
   hasFieldErrors,
@@ -48,13 +53,16 @@ const initialValues: RegisterValues = {
 };
 
 export function RegisterForm() {
-  const router = useRouter();
+  const { signInWithGoogle, configured, redirectError, clearRedirectError } =
+    useAuth();
   const [values, setValues] = useState<RegisterValues>(initialValues);
   const [errors, setErrors] = useState<FieldErrors<RegisterFields>>({});
   const [touched, setTouched] = useState<
     Partial<Record<RegisterFields, boolean>>
   >({});
   const [submitting, setSubmitting] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
 
   function setField<K extends keyof RegisterValues>(
     field: K,
@@ -62,6 +70,8 @@ export function RegisterForm() {
   ) {
     const nextValues = { ...values, [field]: value };
     setValues(nextValues);
+    setAuthError(null);
+    clearRedirectError();
 
     if (touched[field as RegisterFields] || errors[field as RegisterFields]) {
       setErrors(validateRegister(nextValues));
@@ -81,6 +91,33 @@ export function RegisterForm() {
     } satisfies FieldErrors<RegisterFields>;
   }
 
+  async function handleGoogleSignIn() {
+    setAuthError(null);
+    clearRedirectError();
+    setTouched((current) => ({ ...current, role: true }));
+
+    if (!values.role) {
+      setErrors((current) => ({ ...current, role: "Select a role." }));
+      return;
+    }
+
+    if (!configured) {
+      setAuthError(
+        "Firebase is not configured. Add your keys to .env.local and restart the app.",
+      );
+      return;
+    }
+
+    setGoogleLoading(true);
+    try {
+      await signInWithGoogle(values.role, homePathForRole(values.role));
+      // Redirect navigates away; keep loading state if it doesn't.
+    } catch (error) {
+      setAuthError(getAuthErrorMessage(error));
+      setGoogleLoading(false);
+    }
+  }
+
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setTouched({
@@ -90,14 +127,16 @@ export function RegisterForm() {
       confirmPassword: true,
       role: true,
     });
+    setAuthError(null);
 
     const nextErrors = validateRegister();
     setErrors(nextErrors);
     if (hasFieldErrors(nextErrors)) return;
 
     setSubmitting(true);
-    await new Promise((resolve) => window.setTimeout(resolve, 500));
-    router.push(values.role === "MANAGER" ? "/manager" : "/employee");
+    await new Promise((resolve) => window.setTimeout(resolve, 400));
+    setAuthError("Use Continue with Google to create your account for now.");
+    setSubmitting(false);
   }
 
   return (
@@ -116,6 +155,57 @@ export function RegisterForm() {
         noValidate
         className="mt-8 flex flex-col gap-4"
       >
+        <fieldset className="flex flex-col gap-2 text-left">
+          <legend className="text-xs font-medium text-zinc-400">Role</legend>
+          <div className="grid gap-2">
+            {roles.map((option) => {
+              const selected = values.role === option.value;
+
+              return (
+                <label
+                  key={option.value}
+                  className={cn(
+                    "cursor-pointer rounded-md border px-3 py-3 transition-colors",
+                    selected
+                      ? "border-zinc-500 bg-zinc-900"
+                      : "border-border hover:border-zinc-700 hover:bg-zinc-950",
+                  )}
+                >
+                  <input
+                    type="radio"
+                    name="role"
+                    value={option.value}
+                    checked={selected}
+                    onChange={() => setField("role", option.value)}
+                    className="sr-only"
+                  />
+                  <span className="block text-sm font-medium text-foreground">
+                    {option.label}
+                  </span>
+                  <span className="mt-0.5 block text-xs text-zinc-500">
+                    {option.description}
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+          {touched.role && errors.role ? (
+            <p className="text-xs text-red-400">{errors.role}</p>
+          ) : null}
+        </fieldset>
+
+        <GoogleSignInButton
+          loading={googleLoading}
+          label="Continue with Google"
+          onClick={handleGoogleSignIn}
+        />
+
+        <div className="flex items-center gap-3">
+          <div className="h-px flex-1 bg-border" />
+          <span className="text-xs text-zinc-600">or</span>
+          <div className="h-px flex-1 bg-border" />
+        </div>
+
         <Input
           label="Name"
           name="name"
@@ -173,44 +263,9 @@ export function RegisterForm() {
           }}
         />
 
-        <fieldset className="flex flex-col gap-2 text-left">
-          <legend className="text-xs font-medium text-zinc-400">Role</legend>
-          <div className="grid gap-2">
-            {roles.map((option) => {
-              const selected = values.role === option.value;
-
-              return (
-                <label
-                  key={option.value}
-                  className={cn(
-                    "cursor-pointer rounded-md border px-3 py-3 transition-colors",
-                    selected
-                      ? "border-zinc-500 bg-zinc-900"
-                      : "border-zinc-800 hover:border-zinc-700 hover:bg-zinc-950",
-                  )}
-                >
-                  <input
-                    type="radio"
-                    name="role"
-                    value={option.value}
-                    checked={selected}
-                    onChange={() => setField("role", option.value)}
-                    className="sr-only"
-                  />
-                  <span className="block text-sm font-medium text-foreground">
-                    {option.label}
-                  </span>
-                  <span className="mt-0.5 block text-xs text-zinc-500">
-                    {option.description}
-                  </span>
-                </label>
-              );
-            })}
-          </div>
-          {touched.role && errors.role ? (
-            <p className="text-xs text-red-400">{errors.role}</p>
-          ) : null}
-        </fieldset>
+        {(authError || redirectError) ? (
+          <p className="text-xs text-red-400">{authError ?? redirectError}</p>
+        ) : null}
 
         <Button type="submit" loading={submitting} className="mt-2 w-full">
           {submitting ? "Creating account…" : "Create account"}
