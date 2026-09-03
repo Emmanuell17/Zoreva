@@ -16,58 +16,6 @@ export function validateRequired(
   return undefined;
 }
 
-export function validateName(value: string): string | undefined {
-  const required = validateRequired(value, "Name");
-  if (required) return required;
-
-  if (value.trim().length < 2) {
-    return "Name must be at least 2 characters.";
-  }
-
-  return undefined;
-}
-
-export function validateEmail(value: string): string | undefined {
-  const required = validateRequired(value, "Email");
-  if (required) return required;
-
-  const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  if (!emailPattern.test(value.trim())) {
-    return "Enter a valid email address.";
-  }
-
-  return undefined;
-}
-
-export function validatePassword(value: string): string | undefined {
-  const required = validateRequired(value, "Password");
-  if (required) return required;
-
-  if (value.length < 8) {
-    return "Password must be at least 8 characters.";
-  }
-
-  if (!/[A-Za-z]/.test(value) || !/\d/.test(value)) {
-    return "Password must include letters and numbers.";
-  }
-
-  return undefined;
-}
-
-export function validatePasswordMatch(
-  password: string,
-  confirmPassword: string,
-): string | undefined {
-  const required = validateRequired(confirmPassword, "Confirm password");
-  if (required) return required;
-
-  if (password !== confirmPassword) {
-    return "Passwords do not match.";
-  }
-
-  return undefined;
-}
-
 export function validateDate(value: string): string | undefined {
   const required = validateRequired(value, "Date");
   if (required) return required;
