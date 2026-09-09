@@ -82,3 +82,15 @@ export function validateOptionalMessage(
   }
   return undefined;
 }
+
+export function validateSlots(value: string): string | undefined {
+  const required = validateRequired(value, "How many people");
+  if (required) return required;
+
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 50) {
+    return "Enter a number from 1 to 50.";
+  }
+
+  return undefined;
+}

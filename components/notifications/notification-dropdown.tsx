@@ -78,8 +78,8 @@ export function NotificationDropdown() {
         type="button"
         aria-label={
           unreadCount > 0
-            ? `Notifications, ${unreadCount} unread`
-            : "Notifications"
+            ? `Reminders, ${unreadCount} unread`
+            : "Reminders"
         }
         aria-expanded={open}
         aria-controls={menuId}
@@ -101,7 +101,7 @@ export function NotificationDropdown() {
           <div className="flex items-start justify-between gap-2 border-b border-border px-3 py-2.5">
             <div className="min-w-0">
               <p className="text-sm font-medium tracking-tight text-foreground">
-                Notifications
+                Reminders
               </p>
               <p className="mt-0.5 text-xs text-zinc-500">
                 {unreadCount > 0
@@ -132,7 +132,7 @@ export function NotificationDropdown() {
             ) : preview.length === 0 ? (
               <EmptyState
                 compact
-                title="No notifications yet"
+                title="No reminders yet"
                 description="You're all caught up."
               />
             ) : (
@@ -143,7 +143,7 @@ export function NotificationDropdown() {
                     className="border-b border-border/80 last:border-b-0"
                   >
                     <Link
-                      href={notification.href ?? "/employee/notifications"}
+                      href={notification.href ?? "/employee/reminders"}
                       role="menuitem"
                       onClick={() => {
                         markNotificationRead(notification.id);
@@ -177,11 +177,11 @@ export function NotificationDropdown() {
 
           <div className="border-t border-border px-3 py-2">
             <Link
-              href="/employee/notifications"
+              href="/employee/reminders"
               onClick={() => setOpen(false)}
               className="block rounded-md px-2 py-1.5 text-center text-xs text-zinc-400 transition-colors hover:bg-zinc-900 hover:text-foreground"
             >
-              View all notifications
+              View all reminders
             </Link>
           </div>
         </div>

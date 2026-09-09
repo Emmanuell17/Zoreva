@@ -16,7 +16,7 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Zoreva",
   description:
-    "Availability and shift coordination for employees and managers.",
+    "Choose shifts, confirm, and enter hours — alongside your existing factory process.",
 };
 
 export const viewport: Viewport = {
@@ -36,6 +36,12 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased dark`}
     >
       <body className="flex min-h-full flex-col">
+        <style
+          dangerouslySetInnerHTML={{
+            __html:
+              "html,body{background:#0a0a0a;color:#ededed}body{margin:0;min-height:100%;font-family:var(--font-geist-sans),system-ui,sans-serif}",
+          }}
+        />
         <Providers>{children}</Providers>
       </body>
     </html>

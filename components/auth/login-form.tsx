@@ -50,7 +50,7 @@ export function LoginForm() {
           Log in
         </h1>
         <p className="mt-2 text-sm text-zinc-400">
-          Sign in with Google to manage availability and shifts.
+          Sign in with Google to choose shifts, confirm, and enter hours.
         </p>
       </div>
 

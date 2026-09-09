@@ -1,71 +1,55 @@
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardFooter } from "@/components/ui/card";
-import {
-  cn,
-  formatDate,
-  formatTimeRange,
-  getShiftStatusLabel,
-} from "@/lib/utils";
-import type { Shift, ShiftStatus } from "@/types";
+import { cn, formatDayLabel, formatTimeRange } from "@/lib/utils";
 
 type ShiftCardProps = {
-  shift: Shift;
-  employeeName?: string;
+  date: string | Date;
+  startTime: string;
+  endTime: string;
+  label?: string | null;
+  note?: string | null;
+  badges?: React.ReactNode;
+  meta?: React.ReactNode;
   actions?: React.ReactNode;
+  muted?: boolean;
   className?: string;
 };
 
-const statusVariant: Record<
-  ShiftStatus,
-  "pending" | "confirmed" | "cancelled"
-> = {
-  PENDING: "pending",
-  CONFIRMED: "confirmed",
-  CANCELLED: "cancelled",
-};
-
 export function ShiftCard({
-  shift,
-  employeeName,
+  date,
+  startTime,
+  endTime,
+  label,
+  note,
+  badges,
+  meta,
   actions,
+  muted = false,
   className,
 }: ShiftCardProps) {
-  const isCancelled = shift.status === "CANCELLED";
-
   return (
-    <Card
-      className={cn(
-        "overflow-hidden",
-        isCancelled && "opacity-70",
-        className,
-      )}
-    >
+    <Card className={cn("overflow-hidden", muted && "opacity-70", className)}>
       <div className="flex items-start justify-between gap-3 px-4 py-3.5">
         <div className="min-w-0">
           <p className="text-sm font-medium tracking-tight text-foreground">
-            {formatDate(shift.date)}
+            {formatDayLabel(date)}
           </p>
           <p className="mt-0.5 text-xs text-zinc-400">
-            {formatTimeRange(shift.startTime, shift.endTime)}
+            {label ? `${label} · ` : ""}
+            {formatTimeRange(startTime, endTime)}
           </p>
-          {employeeName ? (
-            <p className="mt-1 text-xs text-zinc-500">{employeeName}</p>
-          ) : null}
+          {meta ? <div className="mt-1.5 text-xs text-zinc-500">{meta}</div> : null}
         </div>
-        <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
-          <Badge variant={statusVariant[shift.status]}>
-            {getShiftStatusLabel(shift.status)}
-          </Badge>
-          {shift.covered ? <Badge variant="success">Covered</Badge> : null}
-        </div>
+        {badges ? (
+          <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
+            {badges}
+          </div>
+        ) : null}
       </div>
 
-      {shift.note ? (
+      {note ? (
         <CardContent className="border-t border-border pt-3">
-          <p className="text-xs leading-relaxed text-zinc-500">
-            <span className="text-zinc-400">Note: </span>
-            {shift.note}
-          </p>
+          <p className="text-xs leading-relaxed text-zinc-500">{note}</p>
         </CardContent>
       ) : null}
 
@@ -75,5 +59,20 @@ export function ShiftCard({
         </CardFooter>
       ) : null}
     </Card>
+  );
+}
+
+export function SpotsBadge({ remaining, slots }: { remaining: number; slots: number }) {
+  if (remaining <= 0) {
+    return <Badge variant="cancelled">Full</Badge>;
+  }
+
+  return (
+    <Badge variant="default">
+      {remaining} {remaining === 1 ? "spot" : "spots"} left
+      <span className="sr-only">
+        {` of ${slots}`}
+      </span>
+    </Badge>
   );
 }

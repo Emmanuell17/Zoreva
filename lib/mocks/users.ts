@@ -40,10 +40,10 @@ export const usersSeed: User[] = [
     createdAt: daysFromToday(-18),
   },
   {
-    id: "mgr_demo_1",
+    id: "adm_demo_1",
     name: "Taylor Quinn",
     email: "taylor.quinn@zoreva.app",
-    role: "MANAGER",
+    role: "ADMIN",
     createdAt: daysFromToday(-200),
   },
 ];

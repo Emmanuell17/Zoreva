@@ -2,11 +2,11 @@ import Link from "next/link";
 
 const shifts = [
   { day: "Mon", label: "Morning", top: "28%", left: "8%", width: "18%" },
-  { day: "Tue", label: "Mid", top: "44%", left: "28%", width: "16%" },
-  { day: "Wed", label: "Close", top: "32%", left: "48%", width: "20%" },
-  { day: "Thu", label: "Open", top: "52%", left: "12%", width: "22%" },
-  { day: "Fri", label: "Cover", top: "38%", left: "62%", width: "18%" },
-  { day: "Sat", label: "Split", top: "58%", left: "40%", width: "24%" },
+  { day: "Tue", label: "Afternoon", top: "44%", left: "28%", width: "16%" },
+  { day: "Wed", label: "Morning", top: "32%", left: "48%", width: "20%" },
+  { day: "Thu", label: "Afternoon", top: "52%", left: "12%", width: "22%" },
+  { day: "Fri", label: "Morning", top: "38%", left: "62%", width: "18%" },
+  { day: "Sat", label: "Afternoon", top: "58%", left: "40%", width: "24%" },
 ];
 
 export function LandingPage() {
@@ -90,11 +90,11 @@ export function LandingPage() {
             Zoreva
           </p>
           <h1 className="animate-[fade-up_0.75s_ease-out_0.12s_both] mt-5 max-w-xl text-xl font-medium tracking-tight text-zinc-100 sm:mt-6 sm:text-3xl">
-            Shift coordination that stays clear.
+            Choose. Confirm. Enter hours.
           </h1>
           <p className="animate-[fade-up_0.75s_ease-out_0.22s_both] mt-4 max-w-md text-sm leading-relaxed text-zinc-400 sm:mt-6 sm:text-base">
-            Employees share availability. Managers assign shifts. Everyone sees
-            the same schedule.
+            A simple shift app that works next to Facebook, paper forms, and
+            your payment website — not instead of them.
           </p>
           <div className="animate-[fade-up_0.75s_ease-out_0.34s_both] mt-8 flex w-full flex-col gap-3 sm:mt-10 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center">
             <Link
@@ -116,12 +116,12 @@ export function LandingPage() {
       <section className="border-t border-zinc-800 px-5 py-16 sm:px-10 sm:py-24">
         <div className="mx-auto max-w-3xl">
           <h2 className="text-2xl font-medium tracking-tight text-foreground sm:text-3xl">
-            Built for the week ahead.
+            Built for the factory floor.
           </h2>
           <p className="mt-4 max-w-2xl text-sm leading-relaxed text-zinc-400 sm:text-base">
-            Zoreva replaces scattered messages with one place to mark when you
-            can work, publish shifts, and keep coverage visible for the whole
-            team.
+            Large buttons. Plain language. Fast on a phone. Workers choose a
+            shift, get a reminder, confirm they are coming, then enter hours
+            after the shift.
           </p>
         </div>
       </section>
@@ -133,17 +133,17 @@ export function LandingPage() {
               For employees
             </h2>
             <p className="mt-3 text-sm leading-relaxed text-zinc-400">
-              Submit availability, check assigned shifts, and stay aligned
-              without chasing updates.
+              Choose a shift, confirm you are coming, see your schedule, and
+              enter hours after you work.
             </p>
           </div>
           <div>
             <h2 className="text-xl font-medium tracking-tight text-foreground">
-              For managers
+              For admins
             </h2>
             <p className="mt-3 text-sm leading-relaxed text-zinc-400">
-              See who is free, fill the schedule, and confirm coverage before
-              the week starts.
+              Create shifts, see who chose and who confirmed, then review hours
+              against paper records.
             </p>
           </div>
         </div>
@@ -152,10 +152,11 @@ export function LandingPage() {
       <section className="border-t border-zinc-800 px-5 py-16 sm:px-10 sm:py-24">
         <div className="mx-auto max-w-3xl">
           <h2 className="text-2xl font-medium tracking-tight text-foreground sm:text-3xl">
-            Start coordinating today.
+            Start with one extra step.
           </h2>
           <p className="mt-4 max-w-xl text-sm leading-relaxed text-zinc-400 sm:text-base">
-            Create an account and set up your first week of shifts in minutes.
+            Keep your current process. Add this app next to it so digital
+            records are useful from day one.
           </p>
           <div className="mt-8">
             <Link
@@ -174,7 +175,7 @@ export function LandingPage() {
             Zoreva
           </p>
           <p className="text-xs text-zinc-600">
-            Availability and shift coordination
+            Shift selection, confirmation, and hours
           </p>
         </div>
       </footer>

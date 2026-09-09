@@ -8,6 +8,7 @@ export {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+export { CopyButton } from "@/components/ui/copy-button";
 export { EmptyState } from "@/components/ui/empty-state";
 export { Input } from "@/components/ui/input";
 export { LoadingState } from "@/components/ui/loading-state";

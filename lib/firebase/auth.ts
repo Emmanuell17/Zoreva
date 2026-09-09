@@ -1,6 +1,9 @@
 import {
   GoogleAuthProvider,
+  browserLocalPersistence,
   getRedirectResult,
+  setPersistence,
+  signInWithPopup,
   signInWithRedirect,
   signOut as firebaseSignOut,
   type User,
@@ -15,25 +18,96 @@ const AUTH_RETURN_KEY = "zoreva:authReturn";
 const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: "select_account" });
 
-/**
- * Starts Google sign-in via full-page redirect (avoids popup blockers).
- * The page will navigate away; completion is handled by completeGoogleRedirect().
- */
-export async function startGoogleSignIn(options?: {
-  role?: Role;
-  returnTo?: string;
-}): Promise<void> {
+let redirectResultPromise: Promise<GoogleRedirectResult | null> | null = null;
+let persistenceReady: Promise<void> | null = null;
+
+async function readyAuth() {
+  const auth = getFirebaseAuth();
+  persistenceReady ??= setPersistence(auth, browserLocalPersistence).then(
+    () => undefined,
+    () => undefined,
+  );
+  await persistenceReady;
+  return auth;
+}
+
+function storeSignInOptions(options?: { role?: Role; returnTo?: string }) {
   if (typeof window === "undefined") return;
 
   if (options?.role) {
     window.sessionStorage.setItem(PENDING_ROLE_KEY, options.role);
   }
-  if (options?.returnTo?.startsWith("/")) {
+  if (options?.returnTo && isAppPath(options.returnTo)) {
     window.sessionStorage.setItem(AUTH_RETURN_KEY, options.returnTo);
   }
+}
 
-  const auth = getFirebaseAuth();
-  await signInWithRedirect(auth, googleProvider);
+function applyPendingRole(): Role {
+  const pendingRole = window.sessionStorage.getItem(PENDING_ROLE_KEY);
+  window.sessionStorage.removeItem(PENDING_ROLE_KEY);
+  const role: Role = parseRole(pendingRole) ?? getStoredRole() ?? "EMPLOYEE";
+  setStoredRole(role);
+  return role;
+}
+
+export function isAuthPath(path: string): boolean {
+  return path === "/login" || path === "/register" || path.startsWith("/login?");
+}
+
+export function isAppPath(path: string): boolean {
+  return path.startsWith("/") && !isAuthPath(path) && path !== "/";
+}
+
+export function consumeReturnTo(role: Role | null): string {
+  if (typeof window === "undefined") return homePathForRole(role);
+
+  const stored = window.sessionStorage.getItem(AUTH_RETURN_KEY);
+  window.sessionStorage.removeItem(AUTH_RETURN_KEY);
+  if (stored && isAppPath(stored)) return stored;
+  return homePathForRole(role);
+}
+
+/**
+ * Signs in with a popup when possible. Falls back to a full-page redirect
+ * if the browser blocks the popup.
+ */
+export async function startGoogleSignIn(options?: {
+  role?: Role;
+  returnTo?: string;
+}): Promise<GoogleRedirectResult | null> {
+  if (typeof window === "undefined") return null;
+
+  storeSignInOptions(options);
+  const auth = await readyAuth();
+
+  try {
+    const result = await signInWithPopup(auth, googleProvider);
+    const role = applyPendingRole();
+    return {
+      user: result.user,
+      role,
+      returnTo: null,
+    };
+  } catch (error) {
+    const code =
+      typeof error === "object" && error !== null && "code" in error
+        ? String((error as { code?: string }).code)
+        : "";
+
+    if (
+      code === "auth/popup-closed-by-user" ||
+      code === "auth/cancelled-popup-request"
+    ) {
+      throw error;
+    }
+
+    if (code === "auth/popup-blocked") {
+      await signInWithRedirect(auth, googleProvider);
+      return null;
+    }
+
+    throw error;
+  }
 }
 
 export type GoogleRedirectResult = {
@@ -43,40 +117,38 @@ export type GoogleRedirectResult = {
 };
 
 export async function completeGoogleRedirect(): Promise<GoogleRedirectResult | null> {
-  const auth = getFirebaseAuth();
-  const result = await getRedirectResult(auth);
-  if (!result) return null;
+  if (!redirectResultPromise) {
+    redirectResultPromise = (async () => {
+      const auth = await readyAuth();
+      const result = await getRedirectResult(auth);
+      if (!result) return null;
 
-  const pendingRole = window.sessionStorage.getItem(PENDING_ROLE_KEY);
-  window.sessionStorage.removeItem(PENDING_ROLE_KEY);
+      const role = applyPendingRole();
+      return {
+        user: result.user,
+        role,
+        returnTo: null,
+      };
+    })();
+  }
 
-  const returnTo = window.sessionStorage.getItem(AUTH_RETURN_KEY);
-  window.sessionStorage.removeItem(AUTH_RETURN_KEY);
-
-  const role: Role =
-    pendingRole === "MANAGER" || pendingRole === "EMPLOYEE"
-      ? pendingRole
-      : getStoredRole() ?? "EMPLOYEE";
-
-  setStoredRole(role);
-
-  return {
-    user: result.user,
-    role,
-    returnTo: returnTo?.startsWith("/") ? returnTo : null,
-  };
+  return redirectResultPromise;
 }
 
 export async function signOut(): Promise<void> {
-  const auth = getFirebaseAuth();
+  const auth = await readyAuth();
   await firebaseSignOut(auth);
+}
+
+export function parseRole(value: string | null | undefined): Role | null {
+  if (value === "EMPLOYEE" || value === "ADMIN") return value;
+  if (value === "MANAGER") return "ADMIN";
+  return null;
 }
 
 export function getStoredRole(): Role | null {
   if (typeof window === "undefined") return null;
-  const value = window.localStorage.getItem(ROLE_STORAGE_KEY);
-  if (value === "EMPLOYEE" || value === "MANAGER") return value;
-  return null;
+  return parseRole(window.localStorage.getItem(ROLE_STORAGE_KEY));
 }
 
 export function setStoredRole(role: Role): void {
@@ -90,7 +162,7 @@ export function clearStoredRole(): void {
 }
 
 export function homePathForRole(role: Role | null): string {
-  return role === "MANAGER" ? "/manager" : "/employee";
+  return role === "ADMIN" ? "/admin" : "/employee";
 }
 
 export function getAuthErrorMessage(error: unknown): string {
@@ -105,7 +177,7 @@ export function getAuthErrorMessage(error: unknown): string {
     case "auth/cancelled-popup-request":
       return "Sign-in was cancelled.";
     case "auth/popup-blocked":
-      return "Pop-up was blocked. Try again — sign-in now uses a full-page redirect.";
+      return "Pop-up was blocked. Allow pop-ups for this site and try again.";
     case "auth/network-request-failed":
       return "Network error. Check your connection and try again.";
     case "auth/unauthorized-domain":

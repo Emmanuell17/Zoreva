@@ -14,7 +14,5 @@ export function getEmployees(): User[] {
 }
 
 export function getEmployeeName(employeeId: string): string {
-  return (
-    usersSeed.find((user) => user.id === employeeId)?.name ?? "Unknown"
-  );
+  return usersSeed.find((user) => user.id === employeeId)?.name ?? "Unknown";
 }

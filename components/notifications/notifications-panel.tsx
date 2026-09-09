@@ -32,8 +32,8 @@ export function NotificationsPanel() {
   return (
     <div>
       <PageHeader
-        title="Notifications"
-        description="Stay up to date on shifts, coverage, and availability."
+        title="Reminders"
+        description="Things to do: confirm a shift or enter hours."
         actions={
           <Button
             type="button"
@@ -49,11 +49,11 @@ export function NotificationsPanel() {
 
       <div className="rounded-md border border-border bg-surface">
         {loading ? (
-          <LoadingState variant="list" rows={4} label="Loading notifications" />
+          <LoadingState variant="list" rows={4} label="Loading reminders" />
         ) : notifications.length === 0 ? (
           <EmptyState
-            title="No notifications yet"
-            description="Updates about shifts, swaps, and availability will show up here."
+            title="No reminders"
+            description="When you need to confirm a shift or enter hours, it will show up here."
           />
         ) : (
           <ul className="divide-y divide-border">

@@ -1,6 +1,8 @@
-export type Role = "EMPLOYEE" | "MANAGER";
+export type Role = "EMPLOYEE" | "ADMIN";
 
-export type ShiftStatus = "PENDING" | "CONFIRMED" | "CANCELLED";
+export type SignupStatus = "SELECTED" | "CONFIRMED";
+
+export type HoursStatus = "SUBMITTED" | "APPROVED" | "CHECK_PAPER";
 
 export type User = {
   id: string;
@@ -15,27 +17,34 @@ export type Shift = {
   date: string | Date;
   startTime: string;
   endTime: string;
-  employeeId: string;
-  status: ShiftStatus;
+  label?: string | null;
+  slots: number;
   note?: string | null;
-  covered: boolean;
   createdAt?: string | Date;
 };
 
-export type Availability = {
+export type ShiftSignup = {
   id: string;
+  shiftId: string;
   employeeId: string;
-  date: string | Date;
-  available: boolean;
-  note?: string | null;
-  createdAt?: string | Date;
+  status: SignupStatus;
+  selectedAt: string | Date;
+  confirmedAt?: string | Date | null;
 };
 
-export type NotificationType =
-  | "SHIFT_ASSIGNED"
-  | "SHIFT_UPDATED"
-  | "REMINDER"
-  | "COVERAGE";
+export type HoursEntry = {
+  id: string;
+  shiftId: string;
+  employeeId: string;
+  startTime: string;
+  endTime: string;
+  note?: string | null;
+  status: HoursStatus;
+  submittedAt: string | Date;
+  reviewedAt?: string | Date | null;
+};
+
+export type ReminderKind = "CONFIRM" | "HOURS" | "SHIFT";
 
 export type AppNotification = {
   id: string;
@@ -44,22 +53,5 @@ export type AppNotification = {
   href?: string;
   read: boolean;
   createdAt: string | Date;
-  type: NotificationType;
-};
-
-export type SwapRequestStatus =
-  | "PENDING"
-  | "ACCEPTED"
-  | "DECLINED"
-  | "CANCELLED";
-
-export type ShiftSwapRequest = {
-  id: string;
-  fromShiftId: string;
-  fromEmployeeId: string;
-  toEmployeeId: string;
-  toShiftId?: string | null;
-  message?: string | null;
-  status: SwapRequestStatus;
-  createdAt: string | Date;
+  type: ReminderKind;
 };

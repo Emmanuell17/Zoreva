@@ -4,19 +4,17 @@ export type NavItem = {
 };
 
 export const employeeNav: NavItem[] = [
-  { href: "/employee", label: "Dashboard" },
-  { href: "/employee/availability", label: "Availability" },
-  { href: "/employee/shifts", label: "Shifts" },
-  { href: "/employee/swaps", label: "Swaps" },
-  { href: "/employee/notifications", label: "Notifications" },
+  { href: "/employee", label: "Home" },
+  { href: "/employee/choose", label: "Choose" },
+  { href: "/employee/schedule", label: "Schedule" },
+  { href: "/employee/hours", label: "Hours" },
 ];
 
-export const managerNav: NavItem[] = [
-  { href: "/manager", label: "Dashboard" },
-  { href: "/manager/employees", label: "Employees" },
-  { href: "/manager/availability", label: "Availability" },
-  { href: "/manager/shifts", label: "Shifts" },
-  { href: "/manager/swaps", label: "Swaps" },
+export const adminNav: NavItem[] = [
+  { href: "/admin", label: "Home" },
+  { href: "/admin/shifts", label: "Shifts" },
+  { href: "/admin/hours", label: "Hours" },
+  { href: "/admin/history", label: "History" },
 ];
 
 export function isNavItemActive(
@@ -37,6 +35,7 @@ export function getPageTitle(
 ): string {
   const exact = navItems.find((item) => item.href === pathname);
   if (exact) return exact.label;
+  if (pathname.startsWith("/employee/reminders")) return "Reminders";
   const nested = navItems.find(
     (item) => item.href !== pathname && pathname.startsWith(item.href),
   );

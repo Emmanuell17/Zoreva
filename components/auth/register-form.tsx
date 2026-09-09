@@ -12,12 +12,12 @@ const roles: { value: Role; label: string; description: string }[] = [
   {
     value: "EMPLOYEE",
     label: "Employee",
-    description: "Share availability and view your shifts",
+    description: "Choose shifts, confirm, and enter hours",
   },
   {
-    value: "MANAGER",
-    label: "Manager",
-    description: "Coordinate coverage and assign shifts",
+    value: "ADMIN",
+    label: "Admin",
+    description: "Create shifts and review hours",
   },
 ];
 

@@ -11,17 +11,16 @@ export {
   subscribeNotifications,
 } from "@/lib/services/notifications";
 export {
+  confirmShift,
   createShift,
-  getEmployeeShifts,
-  getManagerShifts,
+  createShifts,
+  approveMatchingHours,
+  getScheduleSnapshot,
   getShiftById,
-  getSwappableShifts,
-  subscribeShifts,
-  updateShiftStatus,
-} from "@/lib/services/shifts";
-export {
-  addSwapRequest,
-  getSwapRequests,
-  subscribeSwapRequests,
-  updateSwapRequestStatus,
-} from "@/lib/services/swaps";
+  leaveShift,
+  removeShift,
+  reviewHours,
+  selectShift,
+  submitHours,
+  subscribeSchedule,
+} from "@/lib/services/schedule";
