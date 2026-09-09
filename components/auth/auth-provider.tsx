@@ -7,7 +7,6 @@ import {
   useMemo,
   useState,
 } from "react";
-import { useRouter } from "next/navigation";
 import { onAuthStateChanged, type User } from "firebase/auth";
 import {
   clearStoredRole,
@@ -30,8 +29,12 @@ type AuthContextValue = {
   role: Role | null;
   loading: boolean;
   configured: boolean;
+  ready: boolean;
   redirectError: string | null;
-  signInWithGoogle: (role?: Role, returnTo?: string) => Promise<void>;
+  signInWithGoogle: (
+    role?: Role,
+    returnTo?: string,
+  ) => Promise<string | null>;
   signOut: () => Promise<void>;
   setRole: (role: Role) => void;
   clearRedirectError: () => void;
@@ -40,48 +43,46 @@ type AuthContextValue = {
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const router = useRouter();
   const configured = isFirebaseConfigured();
   const [user, setUser] = useState<User | null>(null);
   const [role, setRoleState] = useState<Role | null>(null);
   const [loading, setLoading] = useState(configured);
+  const [ready, setReady] = useState(!configured);
   const [redirectError, setRedirectError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!configured) {
-      setLoading(false);
-      return;
-    }
+    if (!configured) return;
 
     const auth = getFirebaseAuth();
+    let cancelled = false;
     let unsubscribe = () => {};
 
     async function init() {
       try {
-        const completed = await completeGoogleRedirect();
-        if (completed) {
-          setUser(completed.user);
-          setRoleState(completed.role);
-          setLoading(false);
-          router.replace(
-            completed.returnTo ?? homePathForRole(completed.role),
-          );
-        }
+        await completeGoogleRedirect();
       } catch (error) {
-        setRedirectError(getAuthErrorMessage(error));
+        if (!cancelled) {
+          setRedirectError(getAuthErrorMessage(error));
+        }
       }
+
+      if (cancelled) return;
 
       unsubscribe = onAuthStateChanged(auth, (nextUser) => {
         setUser(nextUser);
         setRoleState(nextUser ? getStoredRole() : null);
         setLoading(false);
+        setReady(true);
       });
     }
 
     void init();
 
-    return () => unsubscribe();
-  }, [configured, router]);
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, [configured]);
 
   const value = useMemo<AuthContextValue>(
     () => ({
@@ -89,14 +90,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       role,
       loading,
       configured,
+      ready,
       redirectError,
       async signInWithGoogle(nextRole, returnTo) {
-        await startGoogleSignIn({
+        const result = await startGoogleSignIn({
           role: nextRole,
           returnTo:
             returnTo ??
             homePathForRole(nextRole ?? getStoredRole() ?? "EMPLOYEE"),
         });
+
+        if (result) {
+          setUser(result.user);
+          setRoleState(result.role);
+          setLoading(false);
+          setReady(true);
+          return result.returnTo;
+        }
+
+        return null;
       },
       async signOut() {
         await firebaseSignOut();
@@ -112,7 +124,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setRedirectError(null);
       },
     }),
-    [user, role, loading, configured, redirectError],
+    [user, role, loading, configured, ready, redirectError],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

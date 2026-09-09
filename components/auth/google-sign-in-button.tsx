@@ -11,7 +11,13 @@ type GoogleSignInButtonProps = {
 
 function GoogleIcon() {
   return (
-    <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden>
+    <svg
+      viewBox="0 0 24 24"
+      width="16"
+      height="16"
+      className="h-4 w-4"
+      aria-hidden
+    >
       <path
         fill="#EA4335"
         d="M12 10.2v3.9h5.5c-.2 1.3-.9 2.4-1.9 3.1l3.1 2.4c1.8-1.7 2.9-4.1 2.9-7 0-.7-.1-1.3-.2-1.9H12z"

@@ -15,10 +15,10 @@ type RequireAuthProps = {
 export function RequireAuth({ children, allowedRole }: RequireAuthProps) {
   const router = useRouter();
   const pathname = usePathname();
-  const { user, role, loading, configured } = useAuth();
+  const { user, role, loading, configured, ready } = useAuth();
 
   useEffect(() => {
-    if (loading) return;
+    if (!ready || loading) return;
 
     if (!configured) {
       // Allow browsing the UI without Firebase during local setup.
@@ -36,7 +36,7 @@ export function RequireAuth({ children, allowedRole }: RequireAuthProps) {
         router.replace(homePathForRole(effectiveRole));
       }
     }
-  }, [allowedRole, configured, loading, pathname, role, router, user]);
+  }, [allowedRole, configured, loading, pathname, ready, role, router, user]);
 
   if (!configured) {
     return <>{children}</>;
@@ -45,7 +45,7 @@ export function RequireAuth({ children, allowedRole }: RequireAuthProps) {
   const effectiveRole = role ?? "EMPLOYEE";
   const roleMismatch = Boolean(allowedRole && effectiveRole !== allowedRole);
 
-  if (loading || !user || roleMismatch) {
+  if (loading || !ready || !user || roleMismatch) {
     return (
       <div className="flex min-h-full flex-1 items-center justify-center">
         <LoadingState label="Checking session…" />

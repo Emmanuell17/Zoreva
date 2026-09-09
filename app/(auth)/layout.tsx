@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { AuthGate } from "@/components/auth/auth-gate";
 
 export default function AuthLayout({
   children,
@@ -13,7 +14,9 @@ export default function AuthLayout({
       >
         Zoreva
       </Link>
-      <div className="mt-8 w-full max-w-sm sm:mt-10">{children}</div>
+      <div className="mt-8 w-full max-w-sm sm:mt-10">
+        <AuthGate>{children}</AuthGate>
+      </div>
     </div>
   );
 }
