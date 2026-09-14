@@ -145,8 +145,8 @@ types/               Domain types (Shift, Signup, Hours, Company)
 **Requirements:** Node.js 18+ and npm
 
 ```bash
-git clone https://github.com/Emmanuell17/Availability-and-shift-coordinator-.git
-cd Availability-and-shift-coordinator-
+git clone https://github.com/Emmanuell17/Zoreva.git
+cd Zoreva
 npm install
 npm run dev
 ```
