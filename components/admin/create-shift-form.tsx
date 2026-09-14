@@ -1,10 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
-import { shiftPresets } from "@/lib/shift-presets";
+import { useSchedule } from "@/hooks/use-schedule";
+import { getShiftPresets } from "@/lib/shift-presets";
+import { calendarDayKey, isSameShiftSlot, signupsForShift } from "@/lib/shift-utils";
 import { cn } from "@/lib/utils";
 import {
   hasFieldErrors,
@@ -15,11 +17,21 @@ import {
   type FieldErrors,
 } from "@/lib/validation";
 import type { CreateShiftInput } from "@/lib/services/schedule";
+import {
+  getScheduleSnapshot,
+  keepOnlySelectedShiftsOnDays,
+} from "@/lib/services/schedule";
+import type { Shift } from "@/types";
 
 type CreateShiftFormProps = {
   open: boolean;
   onClose: () => void;
   onCreate: (input: CreateShiftInput[]) => void;
+  shift?: Shift | null;
+  onUpdate?: (
+    shiftId: string,
+    input: CreateShiftInput,
+  ) => { ok: true } | { ok: false; reason: string };
 };
 
 type FormState = {
@@ -63,13 +75,25 @@ function tomorrowDate(): string {
 }
 
 function getDefaultFormState(): FormState {
+  const preset = getShiftPresets()[0];
   return {
     date: tomorrowDate(),
-    startTime: shiftPresets[0].startTime,
-    endTime: shiftPresets[0].endTime,
-    slots: "4",
-    label: shiftPresets[0].label,
+    startTime: preset.startTime,
+    endTime: preset.endTime,
+    slots: String(preset.slots),
+    label: preset.label,
     note: "",
+  };
+}
+
+function formStateFromShift(shift: Shift): FormState {
+  return {
+    date: calendarDayKey(shift.date),
+    startTime: shift.startTime,
+    endTime: shift.endTime,
+    slots: String(shift.slots),
+    label: shift.label ?? "",
+    note: shift.note ?? "",
   };
 }
 
@@ -77,17 +101,39 @@ export function CreateShiftForm({
   open,
   onClose,
   onCreate,
+  shift = null,
+  onUpdate,
 }: CreateShiftFormProps) {
+  const editing = Boolean(shift);
   const days = upcomingDays();
+  const presets = getShiftPresets();
+  const { signups } = useSchedule();
   const [severalDays, setSeveralDays] = useState(false);
   const [selectedDays, setSelectedDays] = useState<string[]>([days[0]?.value ?? ""]);
-  const [selectedPresets, setSelectedPresets] = useState<string[]>([
-    shiftPresets[0].label,
-  ]);
+  const [selectedPresets, setSelectedPresets] = useState<string[]>([]);
   const [form, setForm] = useState<FormState>(getDefaultFormState);
   const [errors, setErrors] = useState<FieldErrors<CreateShiftFields>>({});
   const [touched, setTouched] = useState<Partial<Record<CreateShiftFields, boolean>>>({});
   const [submitting, setSubmitting] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    if (shift) {
+      setForm(formStateFromShift(shift));
+      setSeveralDays(false);
+    } else {
+      setForm(getDefaultFormState());
+      setSeveralDays(false);
+      setSelectedDays([days[0]?.value ?? ""]);
+      setSelectedPresets([]);
+    }
+    setErrors({});
+    setTouched({});
+    setSubmitting(false);
+    setNotice(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reset when the modal opens
+  }, [open, shift]);
 
   function updateField<K extends keyof FormState>(key: K, value: FormState[K]) {
     const nextForm = { ...form, [key]: value };
@@ -97,12 +143,13 @@ export function CreateShiftForm({
     }
   }
 
-  function applyPreset(preset: (typeof shiftPresets)[number]) {
+  function applyPreset(preset: (typeof presets)[number]) {
     const nextForm = {
       ...form,
       label: preset.label,
       startTime: preset.startTime,
       endTime: preset.endTime,
+      slots: String(preset.slots),
     };
     setForm(nextForm);
     setErrors(validateCreateShift(nextForm));
@@ -128,9 +175,9 @@ export function CreateShiftForm({
     const timeErrors = validateTimeRange(nextForm.startTime, nextForm.endTime);
 
     return {
-      date: severalDays ? undefined : validateFutureDate(nextForm.date),
-      startTime: severalDays ? undefined : timeErrors.startTime,
-      endTime: severalDays ? undefined : timeErrors.endTime,
+      date: severalDays && !editing ? undefined : validateFutureDate(nextForm.date),
+      startTime: severalDays && !editing ? undefined : timeErrors.startTime,
+      endTime: severalDays && !editing ? undefined : timeErrors.endTime,
       slots: validateSlots(nextForm.slots),
       note: validateOptionalNote(nextForm.note),
     } satisfies FieldErrors<CreateShiftFields>;
@@ -140,10 +187,11 @@ export function CreateShiftForm({
     setForm(getDefaultFormState());
     setSeveralDays(false);
     setSelectedDays([days[0]?.value ?? ""]);
-    setSelectedPresets([shiftPresets[0].label]);
+    setSelectedPresets([]);
     setErrors({});
     setTouched({});
     setSubmitting(false);
+    setNotice(null);
     onClose();
   }
 
@@ -159,8 +207,14 @@ export function CreateShiftForm({
 
     const nextErrors = validateCreateShift();
     setErrors(nextErrors);
+    setNotice(null);
     if (hasFieldErrors(nextErrors)) return;
-    if (severalDays && (selectedDays.length === 0 || selectedPresets.length === 0)) {
+    if (!editing && severalDays && (selectedDays.length === 0 || selectedPresets.length === 0)) {
+      setNotice(
+        selectedDays.length === 0
+          ? "Pick at least one day."
+          : "Pick the times you want on those days.",
+      );
       return;
     }
 
@@ -169,40 +223,118 @@ export function CreateShiftForm({
 
     const slots = Number(form.slots);
     const note = form.note.trim() || null;
+    const presetPositions =
+      presets.find((item) => item.label === form.label)?.positions ?? null;
+
+    if (editing && shift) {
+      const taken = signupsForShift(signups, shift.id).length;
+      if (slots < taken) {
+        setNotice(
+          `${taken} ${taken === 1 ? "person has" : "people have"} already chosen this shift. Keep at least ${taken} spots.`,
+        );
+        setSubmitting(false);
+        return;
+      }
+
+      const input: CreateShiftInput = {
+        date: form.date,
+        startTime: form.startTime,
+        endTime: form.endTime,
+        slots,
+        label: form.label.trim() || null,
+        note,
+        positions: presetPositions ?? shift.positions ?? null,
+      };
+
+      const duplicate = getScheduleSnapshot().shifts.some(
+        (item) => item.id !== shift.id && isSameShiftSlot(item, input),
+      );
+      if (duplicate) {
+        setNotice("That shift already exists for this day and time.");
+        setSubmitting(false);
+        return;
+      }
+
+      const result = onUpdate?.(shift.id, input) ?? { ok: true as const };
+      if (!result.ok) {
+        setNotice(result.reason);
+        setSubmitting(false);
+        return;
+      }
+
+      handleClose();
+      return;
+    }
+
+    const inputs: CreateShiftInput[] = severalDays
+      ? selectedDays.flatMap((date) =>
+          selectedPresets.flatMap((presetLabel) => {
+            const preset = presets.find((item) => item.label === presetLabel);
+            if (!preset) return [];
+            return [
+              {
+                date,
+                startTime: preset.startTime,
+                endTime: preset.endTime,
+                slots: preset.slots || slots,
+                label: preset.label,
+                note,
+                positions: preset.positions,
+              },
+            ];
+          }),
+        )
+      : [
+          {
+            date: form.date,
+            startTime: form.startTime,
+            endTime: form.endTime,
+            slots,
+            label: form.label.trim() || null,
+            note,
+            positions:
+              presets.find((item) => item.label === form.label)?.positions ?? null,
+          },
+        ];
 
     if (severalDays) {
-      const inputs: CreateShiftInput[] = [];
-      for (const date of selectedDays) {
-        for (const presetLabel of selectedPresets) {
-          const preset = shiftPresets.find((item) => item.label === presetLabel);
-          if (!preset) continue;
-          inputs.push({
-            date,
-            startTime: preset.startTime,
-            endTime: preset.endTime,
-            slots,
-            label: preset.label,
-            note,
-          });
-        }
-      }
-      onCreate(inputs);
-    } else {
-      onCreate([
-        {
-          date: form.date,
-          startTime: form.startTime,
-          endTime: form.endTime,
-          slots,
-          label: form.label.trim() || null,
-          note,
-        },
-      ]);
+      keepOnlySelectedShiftsOnDays(selectedDays, inputs);
     }
+
+    const currentShifts = getScheduleSnapshot().shifts;
+    const fresh = inputs.filter(
+      (input) => !currentShifts.some((item) => isSameShiftSlot(item, input)),
+    );
+    const duplicateCount = inputs.length - fresh.length;
+
+    if (severalDays) {
+      if (fresh.length > 0) onCreate(fresh);
+      handleClose();
+      return;
+    }
+
+    if (duplicateCount > 0 && fresh.length === 0) {
+      setNotice("That shift already exists for this day and time.");
+      setSubmitting(false);
+      return;
+    }
+
+    if (fresh.length > 0) {
+      onCreate(fresh);
+    }
+
+    if (duplicateCount > 0) {
+      setNotice(
+        `Added ${fresh.length}. ${duplicateCount} already existed and ${duplicateCount === 1 ? "was" : "were"} skipped.`,
+      );
+      setSubmitting(false);
+      return;
+    }
+
     handleClose();
   }
 
-  const createCount = severalDays
+  const createCount = severalDays && !editing
     ? selectedDays.length * selectedPresets.length
     : 1;
 
@@ -210,10 +342,15 @@ export function CreateShiftForm({
     <Modal
       open={open}
       onClose={handleClose}
-      title="Create shifts"
-      description="Add one shift, or a whole week in one go."
+      title={editing ? "Edit shift" : "Create shifts"}
+      description={
+        editing
+          ? "Change the day, time, name, or how many people are needed."
+          : "Add one shift, or a whole week in one go."
+      }
     >
       <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-4">
+        {editing ? null : (
         <div className="grid grid-cols-2 gap-2">
           <button
             type="button"
@@ -229,7 +366,10 @@ export function CreateShiftForm({
           </button>
           <button
             type="button"
-            onClick={() => setSeveralDays(true)}
+            onClick={() => {
+              setSeveralDays(true);
+              setSelectedPresets([]);
+            }}
             className={cn(
               "rounded-md border px-3 py-2 text-sm",
               severalDays
@@ -240,8 +380,9 @@ export function CreateShiftForm({
             Several days
           </button>
         </div>
+        )}
 
-        {severalDays ? (
+        {!editing && severalDays ? (
           <>
             <div className="flex flex-col gap-1.5">
               <p className="text-xs font-medium text-zinc-400">Days</p>
@@ -267,9 +408,13 @@ export function CreateShiftForm({
               </div>
             </div>
             <div className="flex flex-col gap-1.5">
-              <p className="text-xs font-medium text-zinc-400">Times</p>
+              <p className="text-xs font-medium text-zinc-400">Times each day</p>
+              <p className="text-xs text-zinc-600">
+                Only the times you tap will be on these days. Other empty times
+                on those days are removed.
+              </p>
               <div className="grid grid-cols-2 gap-2">
-                {shiftPresets.map((preset) => {
+                {presets.map((preset) => {
                   const selected = selectedPresets.includes(preset.label);
                   return (
                     <button
@@ -298,7 +443,7 @@ export function CreateShiftForm({
             <div className="flex flex-col gap-1.5">
               <p className="text-xs font-medium text-zinc-400">Quick fill</p>
               <div className="grid grid-cols-2 gap-2">
-                {shiftPresets.map((preset) => {
+                {presets.map((preset) => {
                   const selected =
                     form.label === preset.label &&
                     form.startTime === preset.startTime &&
@@ -375,7 +520,7 @@ export function CreateShiftForm({
           onBlur={() => setTouched((current) => ({ ...current, slots: true }))}
         />
 
-        {!severalDays ? (
+        {!severalDays || editing ? (
           <Input
             label="Name (optional)"
             name="label"
@@ -394,6 +539,15 @@ export function CreateShiftForm({
           onBlur={() => setTouched((current) => ({ ...current, note: true }))}
         />
 
+        {notice ? (
+          <p
+            role="status"
+            className="rounded-md border border-amber-900/80 bg-amber-950/50 px-3 py-2 text-xs leading-relaxed text-amber-200"
+          >
+            {notice}
+          </p>
+        ) : null}
+
         <div className="flex justify-end gap-2 pt-1">
           <Button
             type="button"
@@ -406,12 +560,27 @@ export function CreateShiftForm({
           </Button>
           <Button type="submit" size="sm" loading={submitting}>
             {submitting
-              ? "Creating…"
-              : createCount > 1
-                ? `Create ${createCount} shifts`
-                : "Create shift"}
+              ? editing
+                ? "Saving…"
+                : "Creating…"
+              : editing
+                ? "Save shift"
+                : createCount > 1
+                  ? `Create ${createCount} shifts`
+                  : "Create shift"}
           </Button>
         </div>
+        {!editing && severalDays && createCount > 0 ? (
+          <p className="text-right text-xs text-zinc-500">
+            {selectedDays.length}{" "}
+            {selectedDays.length === 1 ? "day" : "days"} ×{" "}
+            {selectedPresets.length}{" "}
+            {selectedPresets.length === 1 ? "time" : "times"}
+            {selectedPresets.length > 0
+              ? ` (${selectedPresets.join(", ")} each day)`
+              : ""}
+          </p>
+        ) : null}
       </form>
     </Modal>
   );

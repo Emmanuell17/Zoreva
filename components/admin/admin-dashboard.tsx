@@ -4,8 +4,6 @@ import Link from "next/link";
 import { useState } from "react";
 import { CreateShiftForm } from "@/components/admin/create-shift-form";
 import { PageHeader } from "@/components/layout/page-header";
-import { ProcessNote } from "@/components/layout/process-note";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { CopyButton } from "@/components/ui/copy-button";
 import {
@@ -18,6 +16,7 @@ import {
 import { EmptyState } from "@/components/ui/empty-state";
 import { LoadingState } from "@/components/ui/loading-state";
 import { useInitialLoading } from "@/hooks/use-initial-loading";
+import { useCompany } from "@/hooks/use-company";
 import { useSchedule } from "@/hooks/use-schedule";
 import { shiftRosterText, unconfirmedListText } from "@/lib/copy-text";
 import { getEmployeeName } from "@/lib/services";
@@ -38,6 +37,7 @@ import { formatDayLabel, formatTimeRange } from "@/lib/utils";
 
 export function AdminDashboard() {
   const loading = useInitialLoading();
+  const company = useCompany();
   const { shifts, signups, hours } = useSchedule();
   const [createOpen, setCreateOpen] = useState(false);
 
@@ -52,9 +52,13 @@ export function AdminDashboard() {
       : upcoming.filter(
           (shift) => startOfDay(toDate(shift.date)).getTime() === nextDay,
         );
-  const focusTitle = todayShifts.length > 0 ? "Today" : focusShifts[0]
-    ? formatDayLabel(focusShifts[0].date)
-    : "Today";
+  const focusTitle =
+    todayShifts.length > 0
+      ? "Today"
+      : focusShifts[0]
+        ? formatDayLabel(focusShifts[0].date)
+        : "Next";
+
   const unconfirmed = signups.filter((signup) => {
     const shift = shifts.find((item) => item.id === signup.shiftId);
     return signup.status !== "CONFIRMED" && shift && isUpcomingShift(shift);
@@ -68,10 +72,10 @@ export function AdminDashboard() {
       entry.endTime === shift.endTime
     );
   });
-  const openSpots = upcoming.reduce(
-    (sum, shift) => sum + remainingSlots(shift, signups),
-    0,
-  );
+
+  const dayCopy = focusShifts
+    .map((shift) => shiftRosterText(shift, signups))
+    .join("\n\n");
 
   const unconfirmedCopy = unconfirmedListText(
     unconfirmed.flatMap((signup) => {
@@ -89,8 +93,8 @@ export function AdminDashboard() {
   return (
     <div>
       <PageHeader
-        title="Home"
-        description="Today’s roster, who still needs to confirm, and hours to check."
+        title={company?.companyName ?? "Home"}
+        description="Who is working next."
         actions={
           <Button
             size="sm"
@@ -102,32 +106,11 @@ export function AdminDashboard() {
         }
       />
 
-      <div className="grid gap-6">
+      <div className="grid gap-5">
         {loading ? (
-          <LoadingState variant="cards" rows={3} label="Loading overview" />
+          <LoadingState variant="cards" rows={2} label="Loading overview" />
         ) : (
           <>
-            <section className="grid gap-3 sm:grid-cols-3">
-              <Card>
-                <CardHeader className="border-b-0 py-4">
-                  <CardDescription>Not confirmed</CardDescription>
-                  <CardTitle className="text-2xl">{unconfirmed.length}</CardTitle>
-                </CardHeader>
-              </Card>
-              <Card>
-                <CardHeader className="border-b-0 py-4">
-                  <CardDescription>Hours to review</CardDescription>
-                  <CardTitle className="text-2xl">{hoursToReview.length}</CardTitle>
-                </CardHeader>
-              </Card>
-              <Card>
-                <CardHeader className="border-b-0 py-4">
-                  <CardDescription>Open spots</CardDescription>
-                  <CardTitle className="text-2xl">{openSpots}</CardTitle>
-                </CardHeader>
-              </Card>
-            </section>
-
             <Card>
               <CardHeader>
                 <div className="flex items-start justify-between gap-3">
@@ -135,10 +118,13 @@ export function AdminDashboard() {
                     <CardTitle>{focusTitle}</CardTitle>
                     <CardDescription>
                       {todayShifts.length > 0
-                        ? "Who is on the roster today."
-                        : "Next day on the roster."}
+                        ? "People on the roster today."
+                        : "The next day with shifts."}
                     </CardDescription>
                   </div>
+                  {focusShifts.length > 0 ? (
+                    <CopyButton text={dayCopy} label="Copy" />
+                  ) : null}
                 </div>
               </CardHeader>
               <CardContent>
@@ -146,71 +132,77 @@ export function AdminDashboard() {
                   <EmptyState
                     compact
                     className="px-0 py-4"
-                    title="No upcoming shifts"
+                    title="No shifts yet"
                     description="Create a shift so people can choose it."
+                    action={
+                      <Button size="sm" onClick={() => setCreateOpen(true)}>
+                        Create shifts
+                      </Button>
+                    }
                   />
                 ) : (
                   <ul className="divide-y divide-border rounded-md border border-border">
                     {focusShifts.map((shift) => {
                       const people = signupsForShift(signups, shift.id);
+                      const taken = people.length;
+                      const open = remainingSlots(shift, signups);
+
                       return (
                         <li key={shift.id} className="px-4 py-3">
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="min-w-0">
-                              <p className="text-sm font-medium text-foreground">
-                                {shift.label ?? "Shift"} ·{" "}
-                                {formatTimeRange(shift.startTime, shift.endTime)}
-                              </p>
-                              <p className="mt-1 text-xs text-zinc-500">
-                                {people.length === 0
-                                  ? "Nobody chosen yet"
-                                  : people
-                                      .map(
-                                        (signup) =>
-                                          `${getEmployeeName(signup.employeeId)}${signup.status === "CONFIRMED" ? "" : " (not confirmed)"}`,
-                                      )
-                                      .join(", ")}
-                              </p>
-                            </div>
-                            <CopyButton
-                              text={shiftRosterText(shift, signups)}
-                              label="Copy"
-                            />
-                          </div>
+                          <p className="text-sm font-medium text-foreground">
+                            {shift.label ?? "Shift"} ·{" "}
+                            {formatTimeRange(shift.startTime, shift.endTime)}
+                          </p>
+                          <p className="mt-1 text-xs text-zinc-500">
+                            {taken === 0
+                              ? `Nobody yet · ${open} ${open === 1 ? "spot" : "spots"} open`
+                              : `${taken} of ${shift.slots} people${
+                                  people.some((signup) => signup.status !== "CONFIRMED")
+                                    ? " · some not confirmed"
+                                    : ""
+                                }`}
+                          </p>
+                          {people.length > 0 ? (
+                            <p className="mt-1 text-xs text-zinc-400">
+                              {people
+                                .map((signup) => getEmployeeName(signup.employeeId))
+                                .join(", ")}
+                            </p>
+                          ) : null}
                         </li>
                       );
                     })}
                   </ul>
                 )}
+                {upcoming.length > 0 ? (
+                  <p className="mt-3 text-xs text-zinc-600">
+                    <Link
+                      href="/admin/shifts"
+                      className="underline-offset-4 hover:text-foreground hover:underline"
+                    >
+                      See all shifts
+                    </Link>
+                  </p>
+                ) : null}
               </CardContent>
             </Card>
 
-            <Card>
-              <CardHeader>
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                  <div>
-                    <CardTitle>Waiting to confirm</CardTitle>
-                    <CardDescription>
-                      Copy this list to chase people on Facebook if you need to.
-                    </CardDescription>
+            {unconfirmed.length > 0 ? (
+              <Card>
+                <CardHeader>
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <CardTitle>Need to confirm</CardTitle>
+                      <CardDescription>
+                        {unconfirmed.length}{" "}
+                        {unconfirmed.length === 1 ? "person has" : "people have"}{" "}
+                        not confirmed yet.
+                      </CardDescription>
+                    </div>
+                    <CopyButton text={unconfirmedCopy} label="Copy names" />
                   </div>
-                  {unconfirmed.length > 0 ? (
-                    <CopyButton
-                      text={unconfirmedCopy}
-                      label="Copy names"
-                    />
-                  ) : null}
-                </div>
-              </CardHeader>
-              <CardContent>
-                {unconfirmed.length === 0 ? (
-                  <EmptyState
-                    compact
-                    className="px-0 py-4"
-                    title="Everyone has confirmed"
-                    description="New unconfirmed names will show up here."
-                  />
-                ) : (
+                </CardHeader>
+                <CardContent>
                   <ul className="divide-y divide-border rounded-md border border-border">
                     {unconfirmed.slice(0, 8).map((signup) => {
                       const shift = shifts.find(
@@ -219,105 +211,70 @@ export function AdminDashboard() {
                       if (!shift) return null;
 
                       return (
-                        <li
-                          key={signup.id}
-                          className="flex items-center justify-between gap-3 px-4 py-3"
-                        >
-                          <div className="min-w-0">
-                            <p className="text-sm font-medium text-foreground">
-                              {getEmployeeName(signup.employeeId)}
-                            </p>
-                            <p className="mt-0.5 text-xs text-zinc-500">
-                              {formatDayLabel(shift.date)} ·{" "}
-                              {formatTimeRange(shift.startTime, shift.endTime)}
-                            </p>
-                          </div>
-                          <Badge variant="pending">Not confirmed</Badge>
+                        <li key={signup.id} className="px-4 py-3">
+                          <p className="text-sm font-medium text-foreground">
+                            {getEmployeeName(signup.employeeId)}
+                          </p>
+                          <p className="mt-0.5 text-xs text-zinc-500">
+                            {formatDayLabel(shift.date)} ·{" "}
+                            {formatTimeRange(shift.startTime, shift.endTime)}
+                          </p>
                         </li>
                       );
                     })}
                   </ul>
-                )}
-              </CardContent>
-            </Card>
+                </CardContent>
+              </Card>
+            ) : null}
 
-            <Card>
-              <CardHeader>
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                  <div>
-                    <CardTitle>Hours waiting</CardTitle>
-                    <CardDescription>
-                      Approve matching times in one tap, then check paper for the rest.
-                    </CardDescription>
-                  </div>
-                  {matchingHours.length > 0 ? (
-                    <Button
-                      size="sm"
-                      onClick={() => approveMatchingHours()}
-                    >
-                      Approve {matchingHours.length} matching
-                    </Button>
-                  ) : null}
-                </div>
-              </CardHeader>
-              <CardContent>
-                {hoursToReview.length === 0 ? (
-                  <EmptyState
-                    compact
-                    className="px-0 py-4"
-                    title="No hours waiting"
-                    description="Submitted hours will show up here."
-                    action={
+            {hoursToReview.length > 0 ? (
+              <Card>
+                <CardHeader>
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      <CardTitle>Hours to check</CardTitle>
+                      <CardDescription>
+                        {hoursToReview.length}{" "}
+                        {hoursToReview.length === 1 ? "entry" : "entries"} waiting.
+                      </CardDescription>
+                    </div>
+                    {matchingHours.length > 0 ? (
+                      <Button size="sm" onClick={() => approveMatchingHours()}>
+                        Approve {matchingHours.length} matching
+                      </Button>
+                    ) : (
                       <Link href="/admin/hours">
                         <Button size="sm" variant="secondary">
                           Open hours
                         </Button>
                       </Link>
-                    }
-                  />
-                ) : (
+                    )}
+                  </div>
+                </CardHeader>
+                <CardContent>
                   <ul className="divide-y divide-border rounded-md border border-border">
                     {hoursToReview.slice(0, 6).map((entry) => {
                       const shift = shifts.find(
                         (item) => item.id === entry.shiftId,
                       );
                       if (!shift) return null;
-                      const matches =
-                        entry.startTime === shift.startTime &&
-                        entry.endTime === shift.endTime;
 
                       return (
-                        <li
-                          key={entry.id}
-                          className="flex items-center justify-between gap-3 px-4 py-3"
-                        >
-                          <div className="min-w-0">
-                            <p className="text-sm font-medium text-foreground">
-                              {getEmployeeName(entry.employeeId)}
-                            </p>
-                            <p className="mt-0.5 text-xs text-zinc-500">
-                              {formatDayLabel(shift.date)} ·{" "}
-                              {formatTimeRange(entry.startTime, entry.endTime)}
-                              {matches ? " · matches schedule" : " · differs"}
-                            </p>
-                          </div>
-                          <Link
-                            href="/admin/hours"
-                            className="shrink-0 text-xs text-zinc-400 hover:text-foreground"
-                          >
-                            Review
-                          </Link>
+                        <li key={entry.id} className="px-4 py-3">
+                          <p className="text-sm font-medium text-foreground">
+                            {getEmployeeName(entry.employeeId)}
+                          </p>
+                          <p className="mt-0.5 text-xs text-zinc-500">
+                            {formatDayLabel(shift.date)} ·{" "}
+                            {formatTimeRange(entry.startTime, entry.endTime)}
+                          </p>
                         </li>
                       );
                     })}
                   </ul>
-                )}
-              </CardContent>
-            </Card>
-
-            <ProcessNote>
-              Use this alongside your current no-show and payment process.
-            </ProcessNote>
+                </CardContent>
+              </Card>
+            ) : null}
           </>
         )}
       </div>

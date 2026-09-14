@@ -17,6 +17,7 @@ import { getEmployeeName } from "@/lib/services";
 import {
   createShifts,
   removeShift,
+  updateShift,
   type CreateShiftInput,
 } from "@/lib/services/schedule";
 import {
@@ -24,11 +25,13 @@ import {
   remainingSlots,
   signupsForShift,
 } from "@/lib/shift-utils";
+import type { Shift } from "@/types";
 
 export function AdminShiftsPanel() {
   const loading = useInitialLoading();
   const { shifts, signups } = useSchedule();
   const [createOpen, setCreateOpen] = useState(false);
+  const [editingShift, setEditingShift] = useState<Shift | null>(null);
 
   const upcoming = useMemo(
     () => shifts.filter((shift) => isUpcomingShift(shift)),
@@ -44,12 +47,15 @@ export function AdminShiftsPanel() {
     <div>
       <PageHeader
         title="Shifts"
-        description="Create shifts, see who chose them, copy the list for Facebook."
+        description="Create and edit shifts, see who chose them, copy the list for Facebook."
         actions={
           <Button
             size="sm"
             className="w-full sm:w-auto"
-            onClick={() => setCreateOpen(true)}
+            onClick={() => {
+              setEditingShift(null);
+              setCreateOpen(true);
+            }}
           >
             Create shifts
           </Button>
@@ -68,7 +74,10 @@ export function AdminShiftsPanel() {
         emptyTitle="No upcoming shifts"
         emptyDescription="Create a shift so employees can choose it."
         emptyAction={
-          <Button size="sm" onClick={() => setCreateOpen(true)}>
+          <Button size="sm" onClick={() => {
+            setEditingShift(null);
+            setCreateOpen(true);
+          }}>
             Create shifts
           </Button>
         }
@@ -107,7 +116,12 @@ export function AdminShiftsPanel() {
                   }
                   meta={
                     people.length === 0 ? (
-                      "Nobody has chosen this yet"
+                      <>
+                        {shift.positions?.length
+                          ? `${shift.positions.join(", ")} · `
+                          : ""}
+                        Nobody has chosen this yet
+                      </>
                     ) : (
                       <ul className="mt-1 space-y-1">
                         {people.map((signup) => (
@@ -134,6 +148,16 @@ export function AdminShiftsPanel() {
                   }
                   actions={
                     <>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => {
+                          setCreateOpen(false);
+                          setEditingShift(shift);
+                        }}
+                      >
+                        Edit
+                      </Button>
                       <CopyButton
                         text={shiftRosterText(shift, signups)}
                         label="Copy for Facebook"
@@ -157,9 +181,14 @@ export function AdminShiftsPanel() {
       </ShiftCardList>
 
       <CreateShiftForm
-        open={createOpen}
-        onClose={() => setCreateOpen(false)}
+        open={createOpen || Boolean(editingShift)}
+        shift={editingShift}
+        onClose={() => {
+          setCreateOpen(false);
+          setEditingShift(null);
+        }}
         onCreate={handleCreate}
+        onUpdate={(shiftId, input) => updateShift(shiftId, input)}
       />
     </div>
   );
