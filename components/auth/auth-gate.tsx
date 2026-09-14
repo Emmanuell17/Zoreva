@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth/auth-provider";
 import { LoadingState } from "@/components/ui/loading-state";
 import { consumeReturnTo } from "@/lib/firebase/auth";
+import { ownerIdFromAuth, resolveAppPath } from "@/lib/company";
 
 export function AuthGate({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -16,7 +17,9 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       return;
     }
     redirected.current = true;
-    router.replace(consumeReturnTo(role));
+    const requested = consumeReturnTo(role);
+    const ownerId = ownerIdFromAuth({ uid: user.uid, configured });
+    router.replace(resolveAppPath(role, ownerId, requested));
   }, [configured, loading, ready, role, router, user]);
 
   if (!configured) {

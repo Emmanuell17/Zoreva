@@ -9,7 +9,7 @@ export default function AdminLayout({
 }>) {
   return (
     <RequireAuth allowedRole="ADMIN">
-      <AppShell navItems={adminNav} homeHref="/admin" roleLabel="Admin">
+      <AppShell navItems={adminNav} homeHref="/admin" roleLabel="Manager">
         {children}
       </AppShell>
     </RequireAuth>

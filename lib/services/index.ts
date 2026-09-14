@@ -23,4 +23,6 @@ export {
   selectShift,
   submitHours,
   subscribeSchedule,
+  updateShift,
+  keepOnlySelectedShiftsOnDays,
 } from "@/lib/services/schedule";

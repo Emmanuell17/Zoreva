@@ -1,10 +1,11 @@
-import { usersSeed } from "@/lib/mocks/users";
+import { getActiveEmployees } from "@/lib/company/store";
+import { CURRENT_EMPLOYEE_ID } from "@/lib/mocks/users";
 import type { User } from "@/types";
 
-export { CURRENT_EMPLOYEE_ID } from "@/lib/mocks/users";
+export { CURRENT_EMPLOYEE_ID };
 
 export function getUsers(): User[] {
-  return usersSeed.map((user) => ({ ...user }));
+  return getActiveEmployees();
 }
 
 export function getEmployees(): User[] {
@@ -14,5 +15,5 @@ export function getEmployees(): User[] {
 }
 
 export function getEmployeeName(employeeId: string): string {
-  return usersSeed.find((user) => user.id === employeeId)?.name ?? "Unknown";
+  return getUsers().find((user) => user.id === employeeId)?.name ?? "Unknown";
 }

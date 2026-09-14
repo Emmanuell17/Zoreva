@@ -10,6 +10,29 @@ export function startOfDay(value: Date = new Date()): Date {
   return date;
 }
 
+export function calendarDayKey(value: string | Date): string {
+  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return value;
+  }
+
+  const date = startOfDay(toDate(value));
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+export function isSameShiftSlot(
+  a: { date: string | Date; startTime: string; endTime: string },
+  b: { date: string | Date; startTime: string; endTime: string },
+): boolean {
+  return (
+    calendarDayKey(a.date) === calendarDayKey(b.date) &&
+    a.startTime === b.startTime &&
+    a.endTime === b.endTime
+  );
+}
+
 export function shiftDateTime(shift: Pick<Shift, "date" | "startTime" | "endTime">, which: "start" | "end"): Date {
   const date = toDate(shift.date);
   const [hours, minutes] = (which === "start" ? shift.startTime : shift.endTime)

@@ -4,27 +4,15 @@ import Link from "next/link";
 import { useState } from "react";
 import { useAuth } from "@/components/auth/auth-provider";
 import { GoogleSignInButton } from "@/components/auth/google-sign-in-button";
+import { RolePicker } from "@/components/auth/role-picker";
+import { SETUP_PATH } from "@/lib/company/defaults";
 import { getAuthErrorMessage, homePathForRole } from "@/lib/firebase/auth";
-import { cn } from "@/lib/utils";
 import type { Role } from "@/types";
-
-const roles: { value: Role; label: string; description: string }[] = [
-  {
-    value: "EMPLOYEE",
-    label: "Employee",
-    description: "Choose shifts, confirm, and enter hours",
-  },
-  {
-    value: "ADMIN",
-    label: "Admin",
-    description: "Create shifts and review hours",
-  },
-];
 
 export function RegisterForm() {
   const { signInWithGoogle, configured, redirectError, clearRedirectError } =
     useAuth();
-  const [role, setRole] = useState<Role>("EMPLOYEE");
+  const [role, setRole] = useState<Role>("ADMIN");
   const [googleLoading, setGoogleLoading] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
 
@@ -41,7 +29,10 @@ export function RegisterForm() {
 
     setGoogleLoading(true);
     try {
-      await signInWithGoogle(role, homePathForRole(role));
+      await signInWithGoogle(
+        role,
+        role === "ADMIN" ? SETUP_PATH : homePathForRole(role),
+      );
     } catch (error) {
       setAuthError(getAuthErrorMessage(error));
       setGoogleLoading(false);
@@ -55,50 +46,19 @@ export function RegisterForm() {
           Get started
         </h1>
         <p className="mt-2 text-sm text-zinc-400">
-          Choose your role, then continue with Google.
+          Choose Manager or Employee, then continue with Google.
         </p>
       </div>
 
       <div className="mt-8 flex flex-col gap-4">
-        <fieldset className="flex flex-col gap-2 text-left">
-          <legend className="text-xs font-medium text-zinc-400">Role</legend>
-          <div className="grid gap-2">
-            {roles.map((option) => {
-              const selected = role === option.value;
-
-              return (
-                <label
-                  key={option.value}
-                  className={cn(
-                    "cursor-pointer rounded-md border px-3 py-3 transition-colors",
-                    selected
-                      ? "border-zinc-500 bg-zinc-900"
-                      : "border-border hover:border-zinc-700 hover:bg-zinc-950",
-                  )}
-                >
-                  <input
-                    type="radio"
-                    name="role"
-                    value={option.value}
-                    checked={selected}
-                    onChange={() => {
-                      setRole(option.value);
-                      setAuthError(null);
-                      clearRedirectError();
-                    }}
-                    className="sr-only"
-                  />
-                  <span className="block text-sm font-medium text-foreground">
-                    {option.label}
-                  </span>
-                  <span className="mt-0.5 block text-xs text-zinc-500">
-                    {option.description}
-                  </span>
-                </label>
-              );
-            })}
-          </div>
-        </fieldset>
+        <RolePicker
+          value={role}
+          onChange={(nextRole) => {
+            setRole(nextRole);
+            setAuthError(null);
+            clearRedirectError();
+          }}
+        />
 
         <GoogleSignInButton
           loading={googleLoading}

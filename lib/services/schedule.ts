@@ -1,11 +1,14 @@
+import { persistActiveSchedule, registerScheduleBridge } from "@/lib/company/store";
 import { hoursSeed } from "@/lib/mocks/hours";
 import { shiftsSeed } from "@/lib/mocks/shifts";
 import { signupsSeed } from "@/lib/mocks/signups";
 import { CURRENT_EMPLOYEE_ID } from "@/lib/mocks/users";
 import {
+  calendarDayKey,
   employeeHasOverlap,
   hoursForSignup,
   isPastShift,
+  isSameShiftSlot,
   isUpcomingShift,
   remainingSlots,
   signupsForShift,
@@ -26,6 +29,7 @@ export type CreateShiftInput = {
   slots: number;
   label?: string | null;
   note?: string | null;
+  positions?: string[] | null;
 };
 
 export type SubmitHoursInput = {
@@ -53,8 +57,21 @@ function buildSnapshot(): ScheduleSnapshot {
 
 function notify() {
   snapshot = buildSnapshot();
+  persistActiveSchedule(snapshot);
   listeners.forEach((listener) => listener());
 }
+
+function replaceSchedule(state: ScheduleSnapshot) {
+  shifts = state.shifts.map((shift) => ({ ...shift }));
+  signups = state.signups.map((signup) => ({ ...signup }));
+  hours = state.hours.map((entry) => ({ ...entry }));
+  snapshot = buildSnapshot();
+  listeners.forEach((listener) => listener());
+}
+
+registerScheduleBridge({
+  load: replaceSchedule,
+});
 
 export function subscribeSchedule(listener: () => void) {
   listeners.add(listener);
@@ -101,12 +118,23 @@ export function getSignupForShift(
   );
 }
 
-export function createShift(input: CreateShiftInput): Shift {
+export function createShift(input: CreateShiftInput): Shift | undefined {
   return createShifts([input])[0];
 }
 
 export function createShifts(inputs: CreateShiftInput[]): Shift[] {
-  const created = inputs.map((input, index) => ({
+  const uniqueInputs: CreateShiftInput[] = [];
+
+  for (const input of inputs) {
+    const alreadyListed = uniqueInputs.some((item) => isSameShiftSlot(item, input));
+    const alreadySaved = shifts.some((shift) => isSameShiftSlot(shift, input));
+    if (alreadyListed || alreadySaved) continue;
+    uniqueInputs.push(input);
+  }
+
+  if (uniqueInputs.length === 0) return [];
+
+  const created = uniqueInputs.map((input, index) => ({
     id: `shift_${Date.now()}_${index}`,
     date: input.date,
     startTime: input.startTime,
@@ -114,12 +142,78 @@ export function createShifts(inputs: CreateShiftInput[]): Shift[] {
     slots: input.slots,
     label: input.label?.trim() || null,
     note: input.note?.trim() || null,
+    positions: input.positions?.length ? [...input.positions] : null,
     createdAt: new Date().toISOString(),
   }));
 
   shifts = [...shifts, ...created];
   notify();
   return created;
+}
+
+export function keepOnlySelectedShiftsOnDays(
+  dates: Array<string | Date>,
+  keep: CreateShiftInput[],
+): number {
+  const dateKeys = new Set(dates.map((date) => calendarDayKey(date)));
+  const next = shifts.filter((shift) => {
+    if (!dateKeys.has(calendarDayKey(shift.date))) return true;
+    if (isPastShift(shift)) return true;
+    if (signupsForShift(signups, shift.id).length > 0) return true;
+    return keep.some((item) => isSameShiftSlot(shift, item));
+  });
+  const removed = shifts.length - next.length;
+  if (removed === 0) return 0;
+  shifts = next;
+  notify();
+  return removed;
+}
+
+export function updateShift(
+  shiftId: string,
+  input: CreateShiftInput,
+): { ok: true } | { ok: false; reason: string } {
+  const existing = getShiftById(shiftId);
+  if (!existing) {
+    return { ok: false, reason: "That shift is no longer available." };
+  }
+  if (isPastShift(existing)) {
+    return { ok: false, reason: "This shift has already finished." };
+  }
+
+  const taken = signupsForShift(signups, shiftId).length;
+  if (input.slots < taken) {
+    return {
+      ok: false,
+      reason: `${taken} ${taken === 1 ? "person has" : "people have"} already chosen this shift. Keep at least ${taken} spots.`,
+    };
+  }
+
+  const duplicate = shifts.some(
+    (shift) => shift.id !== shiftId && isSameShiftSlot(shift, input),
+  );
+  if (duplicate) {
+    return {
+      ok: false,
+      reason: "That shift already exists for this day and time.",
+    };
+  }
+
+  shifts = shifts.map((shift) => {
+    if (shift.id !== shiftId) return shift;
+    return {
+      ...shift,
+      date: input.date,
+      startTime: input.startTime,
+      endTime: input.endTime,
+      slots: input.slots,
+      label: input.label?.trim() || null,
+      note: input.note?.trim() || null,
+      positions: input.positions?.length ? [...input.positions] : shift.positions ?? null,
+    };
+  });
+  notify();
+  return { ok: true };
 }
 
 export function removeShift(shiftId: string): boolean {

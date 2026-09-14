@@ -4,9 +4,16 @@ import {
   createContext,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useState,
 } from "react";
+import {
+  activateDemoWorkspace,
+  activateWorkspaceForOwner,
+  ownerIdFromAuth,
+} from "@/lib/company/store";
+import "@/lib/services/schedule";
 import { onAuthStateChanged, type User } from "firebase/auth";
 import {
   clearStoredRole,
@@ -45,10 +52,35 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const configured = isFirebaseConfigured();
   const [user, setUser] = useState<User | null>(null);
-  const [role, setRoleState] = useState<Role | null>(null);
+  const [role, setRoleState] = useState<Role | null>(() =>
+    typeof window === "undefined" ? null : getStoredRole(),
+  );
   const [loading, setLoading] = useState(configured);
   const [ready, setReady] = useState(!configured);
   const [redirectError, setRedirectError] = useState<string | null>(null);
+
+  function syncWorkspace(nextRole: Role | null, uid?: string | null) {
+    const ownerId = ownerIdFromAuth({ uid, configured });
+    if (nextRole === "ADMIN" && ownerId) {
+      activateWorkspaceForOwner(ownerId);
+      return;
+    }
+    if (!configured && ownerId && nextRole !== "EMPLOYEE") {
+      const activated = activateWorkspaceForOwner(ownerId);
+      if (activated) return;
+    }
+    activateDemoWorkspace();
+  }
+
+  useLayoutEffect(() => {
+    const stored = getStoredRole();
+    if (stored && stored !== role) {
+      setRoleState(stored);
+    }
+    syncWorkspace(stored ?? role, user?.uid);
+    // First paint should already have the right company loaded.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only on mount / configured
+  }, [configured]);
 
   useEffect(() => {
     if (!configured) return;
@@ -69,8 +101,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (cancelled) return;
 
       unsubscribe = onAuthStateChanged(auth, (nextUser) => {
+        const nextRole = nextUser ? getStoredRole() : null;
+        syncWorkspace(nextRole, nextUser?.uid);
         setUser(nextUser);
-        setRoleState(nextUser ? getStoredRole() : null);
+        setRoleState(nextRole);
         setLoading(false);
         setReady(true);
       });
@@ -101,6 +135,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         });
 
         if (result) {
+          syncWorkspace(result.role, result.user.uid);
           setUser(result.user);
           setRoleState(result.role);
           setLoading(false);
@@ -113,12 +148,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       async signOut() {
         await firebaseSignOut();
         clearStoredRole();
+        activateDemoWorkspace();
         setRoleState(null);
         setUser(null);
       },
       setRole(nextRole) {
         setStoredRole(nextRole);
         setRoleState(nextRole);
+        syncWorkspace(nextRole, user?.uid);
       },
       clearRedirectError() {
         setRedirectError(null);

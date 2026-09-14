@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
 import { useAuth } from "@/components/auth/auth-provider";
 import { Button } from "@/components/ui/button";
+import { useCompany } from "@/hooks/use-company";
 import { isNavItemActive, type NavItem } from "@/lib/navigation";
 
 type SidebarProps = {
@@ -17,6 +18,7 @@ export function Sidebar({ navItems, homeHref, roleLabel }: SidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
   const { user, configured, signOut } = useAuth();
+  const company = useCompany();
   const [signingOut, setSigningOut] = useState(false);
 
   async function handleSignOut() {
@@ -64,9 +66,13 @@ export function Sidebar({ navItems, homeHref, roleLabel }: SidebarProps) {
         })}
       </nav>
       <div className="border-t border-border p-4">
-        <p className="text-xs font-medium text-zinc-400">{roleLabel}</p>
-        {user?.email ? (
-          <p className="mt-0.5 truncate text-xs text-zinc-600">{user.email}</p>
+        <p className="text-xs font-medium text-zinc-400">
+          {company?.companyName ?? roleLabel}
+        </p>
+        {user?.email || company?.email ? (
+          <p className="mt-0.5 truncate text-xs text-zinc-600">
+            {company?.managerName ?? user?.email}
+          </p>
         ) : (
           <p className="mt-0.5 text-xs text-zinc-600">Shift coordination</p>
         )}

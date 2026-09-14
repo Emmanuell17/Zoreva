@@ -5,16 +5,20 @@ import { useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { useAuth } from "@/components/auth/auth-provider";
 import { GoogleSignInButton } from "@/components/auth/google-sign-in-button";
+import { RolePicker } from "@/components/auth/role-picker";
+import { SETUP_PATH } from "@/lib/company/defaults";
 import {
   getAuthErrorMessage,
   getStoredRole,
   homePathForRole,
 } from "@/lib/firebase/auth";
+import type { Role } from "@/types";
 
 export function LoginForm() {
   const searchParams = useSearchParams();
   const { signInWithGoogle, configured, redirectError, clearRedirectError } =
     useAuth();
+  const [role, setRole] = useState<Role>(() => getStoredRole() ?? "ADMIN");
   const [googleLoading, setGoogleLoading] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
 
@@ -32,11 +36,10 @@ export function LoginForm() {
     setGoogleLoading(true);
     try {
       const next = searchParams.get("next");
+      const roleHome = role === "ADMIN" ? SETUP_PATH : homePathForRole(role);
       const returnTo =
-        next && next.startsWith("/")
-          ? next
-          : homePathForRole(getStoredRole());
-      await signInWithGoogle(undefined, returnTo);
+        next && next.startsWith("/") ? next : roleHome;
+      await signInWithGoogle(role, returnTo);
     } catch (error) {
       setAuthError(getAuthErrorMessage(error));
       setGoogleLoading(false);
@@ -50,11 +53,20 @@ export function LoginForm() {
           Log in
         </h1>
         <p className="mt-2 text-sm text-zinc-400">
-          Sign in with Google to choose shifts, confirm, and enter hours.
+          Select Manager or Employee, then sign in with Google.
         </p>
       </div>
 
       <div className="mt-8 flex flex-col gap-4">
+        <RolePicker
+          value={role}
+          onChange={(nextRole) => {
+            setRole(nextRole);
+            setAuthError(null);
+            clearRedirectError();
+          }}
+        />
+
         <GoogleSignInButton
           loading={googleLoading}
           onClick={handleGoogleSignIn}

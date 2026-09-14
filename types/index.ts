@@ -9,7 +9,40 @@ export type User = {
   name: string;
   email: string;
   role: Role;
+  companyId?: string | null;
   createdAt: string | Date;
+};
+
+export type ShiftTemplate = {
+  id: string;
+  name: string;
+  startTime: string;
+  endTime: string;
+  slots: number;
+  positions: string[];
+};
+
+export type Company = {
+  id: string;
+  ownerId: string;
+  companyName: string;
+  managerName: string;
+  email: string;
+  employeeCount: number;
+  shiftTemplates: ShiftTemplate[];
+  employees: User[];
+  shifts: Shift[];
+  signups: ShiftSignup[];
+  hours: HoursEntry[];
+  setupCompletedAt: string;
+};
+
+export type CompanySetupInput = {
+  companyName: string;
+  managerName: string;
+  email: string;
+  employeeCount: number;
+  shiftTemplates: Array<Omit<ShiftTemplate, "id">>;
 };
 
 export type Shift = {
@@ -20,6 +53,8 @@ export type Shift = {
   label?: string | null;
   slots: number;
   note?: string | null;
+  positions?: string[] | null;
+  companyId?: string | null;
   createdAt?: string | Date;
 };
 

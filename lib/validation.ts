@@ -94,3 +94,49 @@ export function validateSlots(value: string): string | undefined {
 
   return undefined;
 }
+
+export function validateEmail(value: string): string | undefined {
+  const required = validateRequired(value, "Email");
+  if (required) return required;
+
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim())) {
+    return "Enter a valid email address.";
+  }
+
+  return undefined;
+}
+
+export function validateCount(
+  value: string,
+  label: string,
+  min: number,
+  max: number,
+): string | undefined {
+  const required = validateRequired(value, label);
+  if (required) return required;
+
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < min || parsed > max) {
+    return `Enter a number from ${min} to ${max}.`;
+  }
+
+  return undefined;
+}
+
+export function parsePositions(value: string): string[] {
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+export function validatePositions(value: string): string | undefined {
+  const positions = parsePositions(value);
+  if (positions.length === 0) {
+    return "Add at least one position. Example: Packer, Picker.";
+  }
+  if (positions.length > 12) {
+    return "Keep it to 12 positions or fewer.";
+  }
+  return undefined;
+}

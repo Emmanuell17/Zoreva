@@ -36,6 +36,7 @@ export function getPageTitle(
   const exact = navItems.find((item) => item.href === pathname);
   if (exact) return exact.label;
   if (pathname.startsWith("/employee/reminders")) return "Reminders";
+  if (pathname.startsWith("/setup")) return "Setup";
   const nested = navItems.find(
     (item) => item.href !== pathname && pathname.startsWith(item.href),
   );
