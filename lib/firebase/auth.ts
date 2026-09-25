@@ -42,6 +42,11 @@ function storeSignInOptions(options?: { role?: Role; returnTo?: string }) {
   }
 }
 
+export function peekPendingRole(): Role | null {
+  if (typeof window === "undefined") return null;
+  return parseRole(window.sessionStorage.getItem(PENDING_ROLE_KEY));
+}
+
 function applyPendingRole(): Role {
   const pendingRole = window.sessionStorage.getItem(PENDING_ROLE_KEY);
   window.sessionStorage.removeItem(PENDING_ROLE_KEY);

@@ -109,6 +109,12 @@ export function LandingPage() {
             >
               Log in
             </Link>
+            <Link
+              href="/join"
+              className="inline-flex h-11 w-full items-center justify-center rounded-md border border-zinc-700 px-5 text-sm font-medium text-foreground transition-colors hover:bg-zinc-900 sm:w-auto"
+            >
+              Join a team
+            </Link>
           </div>
         </div>
       </section>

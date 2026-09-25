@@ -7,13 +7,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import "@/lib/services/schedule";
 import { templateDefaults } from "@/lib/company/defaults";
-import { createCompanyWorkspace, ownerIdFromAuth } from "@/lib/company/store";
+import { ownerIdFromAuth, persistNewCompanyWorkspace } from "@/lib/company/store";
 import {
   hasFieldErrors,
-  parsePositions,
   validateCount,
   validateEmail,
-  validatePositions,
   validateRequired,
   validateTimeRange,
   type FieldErrors,
@@ -25,7 +23,6 @@ type ShiftDraft = {
   startTime: string;
   endTime: string;
   slots: string;
-  positions: string;
 };
 
 type FormState = {
@@ -40,7 +37,7 @@ type FormState = {
 const steps = [
   { title: "Your company", hint: "Who is using Zoreva." },
   { title: "Team size", hint: "How many people and how many shifts in a day." },
-  { title: "Shift times", hint: "Name each shift and who works it." },
+  { title: "Shift times", hint: "Name each shift and set the hours." },
 ] as const;
 
 function draftFromIndex(index: number): ShiftDraft {
@@ -50,7 +47,6 @@ function draftFromIndex(index: number): ShiftDraft {
     startTime: preset.startTime,
     endTime: preset.endTime,
     slots: String(preset.slots),
-    positions: preset.positions,
   };
 }
 
@@ -128,7 +124,6 @@ export function CompanySetupForm() {
         1,
         50,
       );
-      next[`shift-${shiftIndex}-positions`] = validatePositions(shift.positions);
     });
     return next;
   }
@@ -162,20 +157,27 @@ export function CompanySetupForm() {
 
     setSubmitting(true);
     setRole("ADMIN");
-    createCompanyWorkspace(ownerId, {
-      companyName: form.companyName,
-      managerName: form.managerName,
-      email: form.email,
-      employeeCount: Number(form.employeeCount),
-      shiftTemplates: form.shifts.map((shift) => ({
-        name: shift.name,
-        startTime: shift.startTime,
-        endTime: shift.endTime,
-        slots: Number(shift.slots),
-        positions: parsePositions(shift.positions),
-      })),
-    });
-    router.replace("/admin");
+    try {
+      await persistNewCompanyWorkspace(ownerId, {
+        companyName: form.companyName,
+        managerName: form.managerName,
+        email: user?.email || form.email,
+        employeeCount: Number(form.employeeCount),
+        shiftTemplates: form.shifts.map((shift) => ({
+          name: shift.name,
+          startTime: shift.startTime,
+          endTime: shift.endTime,
+          slots: Number(shift.slots),
+          positions: [],
+        })),
+      });
+      router.replace("/admin");
+    } catch {
+      setErrors({
+        companyName: "Could not save the company. Check Firestore is enabled, then try again.",
+      });
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -353,21 +355,6 @@ export function CompanySetupForm() {
                         : undefined
                     }
                     onChange={(event) => updateShift(index, { slots: event.target.value })}
-                  />
-                  <Input
-                    label="Positions"
-                    name={`shift-${index}-positions`}
-                    value={shift.positions}
-                    placeholder="Packer, Picker, Forklift"
-                    hint="Separate with commas."
-                    error={
-                      touched[`shift-${index}-positions`]
-                        ? errors[`shift-${index}-positions`]
-                        : undefined
-                    }
-                    onChange={(event) =>
-                      updateShift(index, { positions: event.target.value })
-                    }
                   />
                 </div>
               </fieldset>

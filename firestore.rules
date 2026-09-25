@@ -1,0 +1,22 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Portfolio MVP: join codes must be readable from another device.
+    // Tighten these before any real production use.
+    match /companies/{companyId} {
+      allow read, write: if true;
+    }
+    match /owners/{ownerId} {
+      allow read, write: if true;
+    }
+    match /joinCodes/{code} {
+      allow read, write: if true;
+    }
+    match /emails/{email} {
+      allow read, write: if true;
+    }
+    match /memberships/{userId} {
+      allow read, write: if true;
+    }
+  }
+}

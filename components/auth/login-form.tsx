@@ -6,11 +6,10 @@ import { useState } from "react";
 import { useAuth } from "@/components/auth/auth-provider";
 import { GoogleSignInButton } from "@/components/auth/google-sign-in-button";
 import { RolePicker } from "@/components/auth/role-picker";
-import { SETUP_PATH } from "@/lib/company/defaults";
+import { JOIN_PATH, SETUP_PATH } from "@/lib/company/defaults";
 import {
   getAuthErrorMessage,
   getStoredRole,
-  homePathForRole,
 } from "@/lib/firebase/auth";
 import type { Role } from "@/types";
 
@@ -36,7 +35,7 @@ export function LoginForm() {
     setGoogleLoading(true);
     try {
       const next = searchParams.get("next");
-      const roleHome = role === "ADMIN" ? SETUP_PATH : homePathForRole(role);
+      const roleHome = role === "ADMIN" ? SETUP_PATH : JOIN_PATH;
       const returnTo =
         next && next.startsWith("/") ? next : roleHome;
       await signInWithGoogle(role, returnTo);
@@ -84,6 +83,13 @@ export function LoginForm() {
           className="text-zinc-300 underline-offset-4 hover:text-foreground hover:underline"
         >
           Get started
+        </Link>
+        {" · "}
+        <Link
+          href="/join"
+          className="text-zinc-300 underline-offset-4 hover:text-foreground hover:underline"
+        >
+          Join with a code
         </Link>
       </p>
     </div>

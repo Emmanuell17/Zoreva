@@ -1,5 +1,6 @@
 export {
   CURRENT_EMPLOYEE_ID,
+  getCurrentEmployeeId,
   getEmployeeName,
   getEmployees,
   getUsers,

@@ -23,6 +23,7 @@
 # misc
 .DS_Store
 *.pem
+commit-style.md
 
 # debug
 npm-debug.log*

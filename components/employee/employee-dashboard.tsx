@@ -13,9 +13,10 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { LoadingState } from "@/components/ui/loading-state";
+import { useCompany } from "@/hooks/use-company";
+import { useCurrentEmployeeId } from "@/hooks/use-current-employee";
 import { useInitialLoading } from "@/hooks/use-initial-loading";
 import { useSchedule } from "@/hooks/use-schedule";
-import { CURRENT_EMPLOYEE_ID } from "@/lib/services";
 import { confirmShift, submitHours } from "@/lib/services/schedule";
 import {
   hoursForSignup,
@@ -30,11 +31,11 @@ import {
 
 export function EmployeeDashboard() {
   const loading = useInitialLoading();
+  const company = useCompany();
+  const employeeId = useCurrentEmployeeId();
   const { shifts, signups, hours } = useSchedule();
 
-  const mine = signups.filter(
-    (signup) => signup.employeeId === CURRENT_EMPLOYEE_ID,
-  );
+  const mine = signups.filter((signup) => signup.employeeId === employeeId);
   const myUpcoming = mine
     .map((signup) => {
       const shift = shifts.find((item) => item.id === signup.shiftId);
@@ -52,7 +53,7 @@ export function EmployeeDashboard() {
     .map((signup) => {
       const shift = shifts.find((item) => item.id === signup.shiftId);
       if (!shift || !isPastShift(shift)) return null;
-      if (hoursForSignup(hours, shift.id, CURRENT_EMPLOYEE_ID)) return null;
+      if (hoursForSignup(hours, shift.id, employeeId)) return null;
       return { shift, signup };
     })
     .filter((item) => item !== null);
@@ -63,7 +64,14 @@ export function EmployeeDashboard() {
 
   return (
     <div>
-      <PageHeader title="Home" description="One thing at a time." />
+      <PageHeader
+        title="Home"
+        description={
+          company?.companyName
+            ? `${company.companyName} — one thing at a time.`
+            : "One thing at a time."
+        }
+      />
 
       <div className="grid gap-5">
         {loading ? (

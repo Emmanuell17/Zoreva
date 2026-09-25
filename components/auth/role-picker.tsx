@@ -12,7 +12,7 @@ export const signInRoles: { value: Role; label: string; description: string }[] 
   {
     value: "EMPLOYEE",
     label: "Employee",
-    description: "Choose shifts, confirm, and enter hours",
+    description: "Join a company with a code, then choose shifts and enter hours",
   },
 ];
 

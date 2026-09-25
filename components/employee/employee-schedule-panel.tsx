@@ -5,19 +5,20 @@ import { ShiftCard } from "@/components/shifts/shift-card";
 import { ShiftCardList } from "@/components/shifts/shift-card-list";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { useCurrentEmployeeId } from "@/hooks/use-current-employee";
 import { useInitialLoading } from "@/hooks/use-initial-loading";
 import { useSchedule } from "@/hooks/use-schedule";
-import { CURRENT_EMPLOYEE_ID } from "@/lib/services";
 import { confirmShift, leaveShift } from "@/lib/services/schedule";
 import { isUpcomingShift, sortShifts } from "@/lib/shift-utils";
 import { getSignupStatusLabel } from "@/lib/utils";
 
 export function EmployeeSchedulePanel() {
   const loading = useInitialLoading();
+  const employeeId = useCurrentEmployeeId();
   const { shifts, signups } = useSchedule();
 
   const mine = signups
-    .filter((signup) => signup.employeeId === CURRENT_EMPLOYEE_ID)
+    .filter((signup) => signup.employeeId === employeeId)
     .map((signup) => {
       const shift = shifts.find((item) => item.id === signup.shiftId);
       if (!shift || !isUpcomingShift(shift)) return null;

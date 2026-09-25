@@ -2,7 +2,7 @@ import { persistActiveSchedule, registerScheduleBridge } from "@/lib/company/sto
 import { hoursSeed } from "@/lib/mocks/hours";
 import { shiftsSeed } from "@/lib/mocks/shifts";
 import { signupsSeed } from "@/lib/mocks/signups";
-import { CURRENT_EMPLOYEE_ID } from "@/lib/mocks/users";
+import { getCurrentEmployeeId } from "@/lib/company/store";
 import {
   calendarDayKey,
   employeeHasOverlap,
@@ -102,7 +102,7 @@ export function getPastShifts(state: ScheduleSnapshot = snapshot): Shift[] {
 }
 
 export function getEmployeeSignups(
-  employeeId: string = CURRENT_EMPLOYEE_ID,
+  employeeId: string = getCurrentEmployeeId(),
   state: ScheduleSnapshot = snapshot,
 ): ShiftSignup[] {
   return state.signups.filter((signup) => signup.employeeId === employeeId);
@@ -110,7 +110,7 @@ export function getEmployeeSignups(
 
 export function getSignupForShift(
   shiftId: string,
-  employeeId: string = CURRENT_EMPLOYEE_ID,
+  employeeId: string = getCurrentEmployeeId(),
   state: ScheduleSnapshot = snapshot,
 ): ShiftSignup | undefined {
   return state.signups.find(
@@ -151,16 +151,25 @@ export function createShifts(inputs: CreateShiftInput[]): Shift[] {
   return created;
 }
 
+function timeKey(value: string) {
+  return value.slice(0, 5);
+}
+
+function slotKey(item: { date: string | Date; startTime: string; endTime: string }) {
+  return `${calendarDayKey(item.date)}|${timeKey(item.startTime)}|${timeKey(item.endTime)}`;
+}
+
 export function keepOnlySelectedShiftsOnDays(
   dates: Array<string | Date>,
   keep: CreateShiftInput[],
 ): number {
   const dateKeys = new Set(dates.map((date) => calendarDayKey(date)));
+  const keepSlots = new Set(keep.map(slotKey));
   const next = shifts.filter((shift) => {
-    if (!dateKeys.has(calendarDayKey(shift.date))) return true;
-    if (isPastShift(shift)) return true;
+    const day = calendarDayKey(shift.date);
+    if (!dateKeys.has(day)) return true;
     if (signupsForShift(signups, shift.id).length > 0) return true;
-    return keep.some((item) => isSameShiftSlot(shift, item));
+    return keepSlots.has(slotKey(shift));
   });
   const removed = shifts.length - next.length;
   if (removed === 0) return 0;
@@ -209,7 +218,7 @@ export function updateShift(
       slots: input.slots,
       label: input.label?.trim() || null,
       note: input.note?.trim() || null,
-      positions: input.positions?.length ? [...input.positions] : shift.positions ?? null,
+      positions: input.positions?.length ? [...input.positions] : null,
     };
   });
   notify();
@@ -228,7 +237,7 @@ export function removeShift(shiftId: string): boolean {
 
 export function selectShift(
   shiftId: string,
-  employeeId: string = CURRENT_EMPLOYEE_ID,
+  employeeId: string = getCurrentEmployeeId(),
 ): { ok: true } | { ok: false; reason: string } {
   const shift = getShiftById(shiftId);
   if (!shift) return { ok: false, reason: "That shift is no longer available." };
@@ -260,7 +269,7 @@ export function selectShift(
 
 export function leaveShift(
   shiftId: string,
-  employeeId: string = CURRENT_EMPLOYEE_ID,
+  employeeId: string = getCurrentEmployeeId(),
 ): boolean {
   const shift = getShiftById(shiftId);
   if (!shift || isPastShift(shift)) return false;
@@ -275,7 +284,7 @@ export function leaveShift(
 
 export function confirmShift(
   shiftId: string,
-  employeeId: string = CURRENT_EMPLOYEE_ID,
+  employeeId: string = getCurrentEmployeeId(),
 ): boolean {
   const shift = getShiftById(shiftId);
   if (!shift || isPastShift(shift)) return false;
@@ -300,7 +309,7 @@ export function confirmShift(
 export function submitHours(
   input: SubmitHoursInput,
 ): { ok: true } | { ok: false; reason: string } {
-  const employeeId = input.employeeId ?? CURRENT_EMPLOYEE_ID;
+  const employeeId = input.employeeId ?? getCurrentEmployeeId();
   const shift = getShiftById(input.shiftId);
   if (!shift) return { ok: false, reason: "Shift not found." };
   if (!isPastShift(shift)) {

@@ -6,11 +6,14 @@ import {
   useEffect,
   useLayoutEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import {
   activateDemoWorkspace,
+  activateWorkspaceForMember,
   activateWorkspaceForOwner,
+  hydrateWorkspace,
   ownerIdFromAuth,
 } from "@/lib/company/store";
 import "@/lib/services/schedule";
@@ -21,6 +24,7 @@ import {
   getAuthErrorMessage,
   getStoredRole,
   homePathForRole,
+  peekPendingRole,
   setStoredRole,
   startGoogleSignIn,
   signOut as firebaseSignOut,
@@ -58,11 +62,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(configured);
   const [ready, setReady] = useState(!configured);
   const [redirectError, setRedirectError] = useState<string | null>(null);
+  const syncGen = useRef(0);
 
-  function syncWorkspace(nextRole: Role | null, uid?: string | null) {
+  function syncLocalWorkspace(
+    nextRole: Role | null,
+    uid?: string | null,
+    email?: string | null,
+  ) {
     const ownerId = ownerIdFromAuth({ uid, configured });
     if (nextRole === "ADMIN" && ownerId) {
-      activateWorkspaceForOwner(ownerId);
+      activateWorkspaceForOwner(ownerId, email);
+      return;
+    }
+    if (nextRole === "EMPLOYEE" && uid) {
+      activateWorkspaceForMember(uid);
       return;
     }
     if (!configured && ownerId && nextRole !== "EMPLOYEE") {
@@ -72,12 +85,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     activateDemoWorkspace();
   }
 
+  async function syncWorkspace(
+    nextRole: Role | null,
+    uid?: string | null,
+    email?: string | null,
+  ) {
+    const gen = ++syncGen.current;
+    syncLocalWorkspace(nextRole, uid, email);
+    await hydrateWorkspace({ role: nextRole, uid, email, configured });
+    return gen === syncGen.current;
+  }
+
   useLayoutEffect(() => {
     const stored = getStoredRole();
     if (stored && stored !== role) {
-      setRoleState(stored);
+      // Keep the first paint aligned with the role already stored on this device.
+      queueMicrotask(() => setRoleState(stored));
     }
-    syncWorkspace(stored ?? role, user?.uid);
+    syncLocalWorkspace(stored ?? role, user?.uid, user?.email);
     // First paint should already have the right company loaded.
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only on mount / configured
   }, [configured]);
@@ -101,12 +126,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (cancelled) return;
 
       unsubscribe = onAuthStateChanged(auth, (nextUser) => {
-        const nextRole = nextUser ? getStoredRole() : null;
-        syncWorkspace(nextRole, nextUser?.uid);
-        setUser(nextUser);
-        setRoleState(nextRole);
-        setLoading(false);
-        setReady(true);
+        const pendingRole = nextUser ? peekPendingRole() : null;
+        const nextRole = nextUser ? (pendingRole ?? getStoredRole()) : null;
+        if (nextUser && pendingRole) setStoredRole(pendingRole);
+        void (async () => {
+          await syncWorkspace(nextRole, nextUser?.uid, nextUser?.email);
+          if (cancelled) return;
+          setUser(nextUser);
+          setRoleState(nextRole);
+          setLoading(false);
+          setReady(true);
+        })();
       });
     }
 
@@ -135,7 +165,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         });
 
         if (result) {
-          syncWorkspace(result.role, result.user.uid);
+          await syncWorkspace(result.role, result.user.uid, result.user.email);
           setUser(result.user);
           setRoleState(result.role);
           setLoading(false);
@@ -155,7 +185,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setRole(nextRole) {
         setStoredRole(nextRole);
         setRoleState(nextRole);
-        syncWorkspace(nextRole, user?.uid);
+        void syncWorkspace(nextRole, user?.uid, user?.email);
       },
       clearRedirectError() {
         setRedirectError(null);

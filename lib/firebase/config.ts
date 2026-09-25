@@ -20,7 +20,7 @@ export function isFirebaseConfigured(): boolean {
   );
 }
 
-function createFirebaseApp(): FirebaseApp {
+export function getFirebaseApp(): FirebaseApp {
   const firebaseConfig = getFirebaseConfig();
 
   if (
@@ -45,7 +45,7 @@ export function getFirebaseAuth(): Auth {
   }
 
   if (!authInstance) {
-    authInstance = getAuth(createFirebaseApp());
+    authInstance = getAuth(getFirebaseApp());
   }
 
   return authInstance;

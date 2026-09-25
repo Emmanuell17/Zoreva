@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { CreateShiftForm } from "@/components/admin/create-shift-form";
+import { AdminInviteCard } from "@/components/admin/admin-invite-card";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { CopyButton } from "@/components/ui/copy-button";
@@ -111,6 +112,7 @@ export function AdminDashboard() {
           <LoadingState variant="cards" rows={2} label="Loading overview" />
         ) : (
           <>
+            <AdminInviteCard />
             <Card>
               <CardHeader>
                 <div className="flex items-start justify-between gap-3">

@@ -1,4 +1,4 @@
-import { CURRENT_EMPLOYEE_ID } from "@/lib/mocks/users";
+import { getCurrentEmployeeId, subscribeCompany } from "@/lib/company/store";
 import {
   getScheduleSnapshot,
   subscribeSchedule,
@@ -20,7 +20,7 @@ const extraListeners = new Set<() => void>();
 let notificationsSnapshot: AppNotification[] = [];
 
 function rebuild(state: ScheduleSnapshot = getScheduleSnapshot()) {
-  notificationsSnapshot = buildReminders(CURRENT_EMPLOYEE_ID, state);
+  notificationsSnapshot = buildReminders(getCurrentEmployeeId(), state);
 }
 
 function emit() {
@@ -28,6 +28,11 @@ function emit() {
 }
 
 subscribeSchedule(() => {
+  rebuild();
+  emit();
+});
+
+subscribeCompany(() => {
   rebuild();
   emit();
 });
@@ -42,7 +47,7 @@ export function subscribeNotifications(listener: () => void) {
 }
 
 export function buildReminders(
-  employeeId: string = CURRENT_EMPLOYEE_ID,
+  employeeId: string = getCurrentEmployeeId(),
   state: ScheduleSnapshot = getScheduleSnapshot(),
 ): AppNotification[] {
   const mine = state.signups.filter(

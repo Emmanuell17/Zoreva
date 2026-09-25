@@ -10,6 +10,7 @@ export type User = {
   email: string;
   role: Role;
   companyId?: string | null;
+  authUid?: string | null;
   createdAt: string | Date;
 };
 
@@ -25,6 +26,7 @@ export type ShiftTemplate = {
 export type Company = {
   id: string;
   ownerId: string;
+  joinCode: string;
   companyName: string;
   managerName: string;
   email: string;
@@ -35,6 +37,13 @@ export type Company = {
   signups: ShiftSignup[];
   hours: HoursEntry[];
   setupCompletedAt: string;
+};
+
+export type CompanyMembership = {
+  userId: string;
+  companyId: string;
+  employeeId: string;
+  role: Role;
 };
 
 export type CompanySetupInput = {

@@ -8,9 +8,9 @@ import { ShiftCard } from "@/components/shifts/shift-card";
 import { ShiftCardList } from "@/components/shifts/shift-card-list";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { useCurrentEmployeeId } from "@/hooks/use-current-employee";
 import { useInitialLoading } from "@/hooks/use-initial-loading";
 import { useSchedule } from "@/hooks/use-schedule";
-import { CURRENT_EMPLOYEE_ID } from "@/lib/services";
 import { submitHours } from "@/lib/services/schedule";
 import {
   formatHourCount,
@@ -29,17 +29,18 @@ const hoursVariant: Record<HoursStatus, "pending" | "confirmed" | "warning"> = {
 
 export function EmployeeHoursPanel() {
   const loading = useInitialLoading();
+  const employeeId = useCurrentEmployeeId();
   const { shifts, signups, hours } = useSchedule();
   const [target, setTarget] = useState<Shift | null>(null);
 
   const past = signups
-    .filter((signup) => signup.employeeId === CURRENT_EMPLOYEE_ID)
+    .filter((signup) => signup.employeeId === employeeId)
     .map((signup) => {
       const shift = shifts.find((item) => item.id === signup.shiftId);
       if (!shift || !isPastShift(shift)) return null;
       return {
         shift,
-        hours: hoursForSignup(hours, shift.id, CURRENT_EMPLOYEE_ID) ?? null,
+        hours: hoursForSignup(hours, shift.id, employeeId) ?? null,
       };
     })
     .filter((item) => item !== null)

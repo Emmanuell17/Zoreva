@@ -1,8 +1,11 @@
-import { getActiveEmployees } from "@/lib/company/store";
+import {
+  getActiveEmployees,
+  getCurrentEmployeeId,
+} from "@/lib/company/store";
 import { CURRENT_EMPLOYEE_ID } from "@/lib/mocks/users";
 import type { User } from "@/types";
 
-export { CURRENT_EMPLOYEE_ID };
+export { CURRENT_EMPLOYEE_ID, getCurrentEmployeeId };
 
 export function getUsers(): User[] {
   return getActiveEmployees();

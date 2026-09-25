@@ -2,6 +2,8 @@ import type { NextConfig } from "next";
 import path from "path";
 
 const nextConfig: NextConfig = {
+  // Hide the Next.js “N” badge in the corner during local development.
+  devIndicators: false,
   // Avoid picking a parent lockfile as the Turbopack root (breaks env loading).
   turbopack: {
     root: path.join(__dirname),

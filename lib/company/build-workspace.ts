@@ -1,3 +1,4 @@
+import { uniqueJoinCode } from "@/lib/company/persistence";
 import type { Company, CompanySetupInput, User } from "@/types";
 
 function slugify(value: string): string {
@@ -20,6 +21,7 @@ export function buildCompanyWorkspace(
   const now = new Date().toISOString();
   const id = `co_${Date.now()}`;
   const slug = slugify(input.companyName);
+  const joinCode = uniqueJoinCode();
 
   const shiftTemplates = input.shiftTemplates.map((template, index) => ({
     id: `${id}_tpl_${index + 1}`,
@@ -42,6 +44,7 @@ export function buildCompanyWorkspace(
   return clone({
     id,
     ownerId,
+    joinCode,
     companyName: input.companyName.trim(),
     managerName: input.managerName.trim(),
     email: input.email.trim(),

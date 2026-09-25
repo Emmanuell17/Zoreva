@@ -20,7 +20,7 @@ export function RequireAuth({ children, allowedRole }: RequireAuthProps) {
 
   const effectiveRole = role ?? allowedRole ?? "EMPLOYEE";
   const ownerId = ownerIdFromAuth({ uid: user?.uid, configured });
-  const destination = resolveAppPath(effectiveRole, ownerId, pathname);
+  const destination = resolveAppPath(effectiveRole, ownerId, pathname, user?.email);
   const needsCompanyRedirect = destination !== pathname;
   const roleMismatch = Boolean(allowedRole && effectiveRole !== allowedRole);
 

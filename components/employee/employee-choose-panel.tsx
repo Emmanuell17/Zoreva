@@ -6,10 +6,10 @@ import { ShiftCard, SpotsBadge } from "@/components/shifts/shift-card";
 import { ShiftCardList } from "@/components/shifts/shift-card-list";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { useCurrentEmployeeId } from "@/hooks/use-current-employee";
 import { useInitialLoading } from "@/hooks/use-initial-loading";
 import { useSchedule } from "@/hooks/use-schedule";
 import { groupByDay } from "@/lib/group-by-day";
-import { CURRENT_EMPLOYEE_ID } from "@/lib/services";
 import { confirmShift, selectShift } from "@/lib/services/schedule";
 import {
   employeeHasOverlap,
@@ -19,6 +19,7 @@ import {
 
 export function EmployeeChoosePanel() {
   const loading = useInitialLoading();
+  const employeeId = useCurrentEmployeeId();
   const { shifts, signups } = useSchedule();
   const [error, setError] = useState<string | null>(null);
 
@@ -59,10 +60,10 @@ export function EmployeeChoosePanel() {
               const mine = signups.find(
                 (signup) =>
                   signup.shiftId === shift.id &&
-                  signup.employeeId === CURRENT_EMPLOYEE_ID,
+                  signup.employeeId === employeeId,
               );
               const overlap = employeeHasOverlap(
-                CURRENT_EMPLOYEE_ID,
+                employeeId,
                 shift,
                 shifts,
                 signups,
