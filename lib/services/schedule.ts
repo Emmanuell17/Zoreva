@@ -14,7 +14,7 @@ import {
   signupsForShift,
   sortShifts,
 } from "@/lib/shift-utils";
-import type { HoursEntry, HoursStatus, Shift, ShiftSignup } from "@/types";
+import type { HoursEntry, Shift, ShiftSignup } from "@/types";
 
 export type ScheduleSnapshot = {
   shifts: Shift[];
@@ -338,39 +338,4 @@ export function submitHours(
   hours = [...hours, entry];
   notify();
   return { ok: true };
-}
-
-export function reviewHours(
-  hoursId: string,
-  status: Extract<HoursStatus, "APPROVED" | "CHECK_PAPER">,
-): boolean {
-  let updated = false;
-  if (updated) notify();
-  return updated;
-}
-
-export function approveMatchingHours(): number {
-  let count = 0;
-  const reviewedAt = new Date().toISOString();
-
-  hours = hours.map((entry) => {
-    if (entry.status !== "SUBMITTED") return entry;
-    const shift = shifts.find((item) => item.id === entry.shiftId);
-    if (
-      !shift ||
-      entry.startTime !== shift.startTime ||
-      entry.endTime !== shift.endTime
-    ) {
-      return entry;
-    }
-    count += 1;
-    return {
-      ...entry,
-      status: "APPROVED",
-      reviewedAt,
-    };
-  });
-
-  if (count) notify();
-  return count;
 }

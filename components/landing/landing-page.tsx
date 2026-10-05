@@ -23,12 +23,12 @@ export function LandingPage() {
         />
         <div
           aria-hidden
-          className="animate-[soft-pulse_6s_ease-in-out_infinite] pointer-events-none absolute inset-x-0 bottom-0 h-[36%] bg-[linear-gradient(180deg,transparent,rgba(10,10,10,0.2)_20%,rgba(10,10,10,0.92))] sm:h-[42%]"
+          className="animate-[soft-pulse_6s_ease-in-out_infinite] pointer-events-none absolute inset-x-0 bottom-0 h-[36dvh] bg-[linear-gradient(180deg,transparent,rgba(10,10,10,0.2)_20%,rgba(10,10,10,0.92))] sm:h-[42dvh]"
         />
 
         <div
           aria-hidden
-          className="pointer-events-none absolute inset-x-0 bottom-0 h-[34%] sm:h-[42%]"
+          className="pointer-events-none absolute inset-x-0 bottom-0 h-[34dvh] sm:h-[42dvh]"
         >
           <div className="absolute inset-0 border-t border-zinc-800/80 bg-zinc-950/40 backdrop-blur-[1px]">
             <div className="grid h-9 grid-cols-7 border-b border-zinc-800/80 text-[9px] uppercase tracking-[0.14em] text-zinc-600 sm:h-10 sm:text-xs sm:tracking-[0.18em]">
@@ -85,7 +85,7 @@ export function LandingPage() {
           </Link>
         </header>
 
-        <div className="relative z-10 flex flex-1 flex-col justify-start px-5 pb-[38vh] pt-12 sm:px-10 sm:pb-[46vh] sm:pt-24">
+        <div className="relative z-10 flex flex-1 flex-col justify-start px-5 pb-[40dvh] pt-12 sm:px-10 sm:pb-[48dvh] sm:pt-24">
           <p className="animate-[fade-up_0.75s_ease-out_both] font-mono text-[2rem] font-semibold tracking-[0.14em] text-foreground uppercase sm:text-5xl sm:tracking-[0.22em] md:text-6xl">
             Zoreva
           </p>
@@ -93,8 +93,8 @@ export function LandingPage() {
             Choose. Confirm. Enter hours.
           </h1>
           <p className="animate-[fade-up_0.75s_ease-out_0.22s_both] mt-4 max-w-md text-sm leading-relaxed text-zinc-400 sm:mt-6 sm:text-base">
-            A simple shift app that works next to Facebook, paper forms, and
-            your payment website — not instead of them.
+            Choose a shift, confirm you are coming, and enter hours when the
+            work is done.
           </p>
           <div className="animate-[fade-up_0.75s_ease-out_0.34s_both] mt-8 flex w-full flex-col gap-3 sm:mt-10 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center">
             <Link
@@ -148,8 +148,8 @@ export function LandingPage() {
               For admins
             </h2>
             <p className="mt-3 text-sm leading-relaxed text-zinc-400">
-              Create shifts, see who chose and who confirmed, then review hours
-              against paper records.
+              Create shifts, see who chose and who confirmed, and read the hours
+              they entered.
             </p>
           </div>
         </div>
@@ -158,11 +158,11 @@ export function LandingPage() {
       <section className="border-t border-zinc-800 px-5 py-16 sm:px-10 sm:py-24">
         <div className="mx-auto max-w-3xl">
           <h2 className="text-2xl font-medium tracking-tight text-foreground sm:text-3xl">
-            Start with one extra step.
+            Shifts, confirmations, and hours.
           </h2>
           <p className="mt-4 max-w-xl text-sm leading-relaxed text-zinc-400 sm:text-base">
-            Keep your current process. Add this app next to it so digital
-            records are useful from day one.
+            Open shifts for the week. Your team chooses, confirms, and enters
+            hours in one place.
           </p>
           <div className="mt-8">
             <Link

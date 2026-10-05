@@ -86,44 +86,53 @@ function newestCompany(companies: Company[]): Company | null {
   )[0];
 }
 
+export function companyMatchesManager(
+  company: Company | null | undefined,
+  options: { ownerId?: string | null; email?: string | null },
+): boolean {
+  if (!company?.setupCompletedAt) return false;
+
+  const ownerId = options.ownerId ?? "";
+  if (ownerId && company.ownerId === ownerId) return true;
+  if (company.ownerId && company.ownerId !== LOCAL_OWNER_ID) return false;
+
+  const email = normalizeEmail(options.email);
+  if (!email) return false;
+  return !company.email || normalizeEmail(company.email) === email;
+}
+
 export function findLocalCompanyForManager(options: {
   ownerId?: string | null;
   email?: string | null;
 }): Company | null {
   const ownerId = options.ownerId ?? "";
   const email = normalizeEmail(options.email);
+  const seen = new Set<string>();
+  const candidates: Company[] = [];
 
-  const byOwner = getCompanyById(getCompanyIdForOwner(ownerId));
-  if (byOwner?.setupCompletedAt) return byOwner;
-
-  const byEmailId = getCompanyById(getCompanyIdForEmail(email));
-  if (byEmailId?.setupCompletedAt) return byEmailId;
-
-  const completed = Object.values(getWorkspaces()).filter(
-    (company) => Boolean(company.setupCompletedAt),
-  );
-
-  const emailMatches = email
-    ? completed.filter((company) => normalizeEmail(company.email) === email)
-    : [];
-  const emailMatch = newestCompany(emailMatches);
-  if (emailMatch) return emailMatch;
-
-  const ownerMatch = newestCompany(
-    completed.filter((company) => company.ownerId === ownerId),
-  );
-  if (ownerMatch) return ownerMatch;
-
-  if (ownerId && ownerId !== LOCAL_OWNER_ID) {
-    const localDev = newestCompany(
-      completed.filter((company) => company.ownerId === LOCAL_OWNER_ID),
-    );
-    if (localDev && completed.length === 1) return localDev;
+  function add(company: Company | null) {
+    if (!company || seen.has(company.id)) return;
+    seen.add(company.id);
+    candidates.push(company);
   }
 
-  if (ownerId && completed.length === 1) return completed[0];
+  add(getCompanyById(getCompanyIdForOwner(ownerId)));
+  add(getCompanyById(getCompanyIdForEmail(email)));
+  for (const company of Object.values(getWorkspaces())) add(company);
 
-  return null;
+  const matches = candidates.filter((company) =>
+    companyMatchesManager(company, { ownerId, email }),
+  );
+  const owned = newestCompany(
+    matches.filter((company) => ownerId && company.ownerId === ownerId),
+  );
+  if (owned) return owned;
+
+  return newestCompany(
+    matches.filter(
+      (company) => !company.ownerId || company.ownerId === LOCAL_OWNER_ID,
+    ),
+  );
 }
 
 export function getCompanyIdForJoinCode(code: string | null | undefined): string | null {

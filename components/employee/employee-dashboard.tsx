@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { PageHeader } from "@/components/layout/page-header";
-import { ProcessNote } from "@/components/layout/process-note";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -188,10 +187,6 @@ export function EmployeeDashboard() {
             </Button>
           </Link>
         </div>
-
-        <ProcessNote>
-          Keep using Facebook, the paper form, and the payment website as usual.
-        </ProcessNote>
       </div>
     </div>
   );

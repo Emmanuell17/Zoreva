@@ -12,6 +12,7 @@ import {
 } from "@/lib/company/cloud";
 import { attachAuthEmployee } from "@/lib/company/membership";
 import {
+  companyMatchesManager,
   findLocalCompanyForManager,
   getCompanyById,
   getCompanyIdForJoinCode,
@@ -26,6 +27,7 @@ import {
   saveOwnerEmail,
   uniqueJoinCode,
 } from "@/lib/company/persistence";
+import { LOCAL_OWNER_ID } from "@/lib/company/defaults";
 import { normalizeJoinCode } from "@/lib/company/join-code";
 import { normalizeEmail } from "@/lib/company/email";
 import { buildCompanyWorkspace } from "@/lib/company/build-workspace";
@@ -273,6 +275,14 @@ async function claimCompanyForManager(
   company: Company,
   options: { ownerId: string; email?: string | null },
 ): Promise<Company> {
+  if (
+    company.ownerId &&
+    company.ownerId !== LOCAL_OWNER_ID &&
+    company.ownerId !== options.ownerId
+  ) {
+    return company;
+  }
+
   const email = options.email?.trim() ?? "";
   const next: Company = {
     ...company,
@@ -333,6 +343,10 @@ export async function hydrateWorkspace(options: {
       company = await cacheRemoteCompany(remoteId);
     } else {
       company = (await cacheRemoteCompany(company.id)) ?? company;
+    }
+
+    if (company && !companyMatchesManager(company, { ownerId, email: options.email })) {
+      company = null;
     }
 
     if (company) {

@@ -13,7 +13,7 @@ import {
   signupsForShift,
   sortShifts,
 } from "@/lib/shift-utils";
-import { formatTimeRange, getHoursStatusLabel } from "@/lib/utils";
+import { formatTimeRange } from "@/lib/utils";
 
 export function AdminHistoryPanel() {
   const loading = useInitialLoading();
@@ -64,7 +64,7 @@ export function AdminHistoryPanel() {
                         <li key={signup.id}>
                           {getEmployeeName(signup.employeeId)}
                           {entry
-                            ? ` · ${formatTimeRange(entry.startTime, entry.endTime)} · ${getHoursStatusLabel(entry.status)}`
+                            ? ` · ${formatTimeRange(entry.startTime, entry.endTime)}`
                             : " · no hours entered"}
                         </li>
                       );
