@@ -3,19 +3,37 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import type { User } from "firebase/auth";
 import { useAuth } from "@/components/auth/auth-provider";
 import { GoogleSignInButton } from "@/components/auth/google-sign-in-button";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
+  clearPendingJoinCode,
   formatJoinCode,
   hasJoinedCompany,
   joinCompanyWithCode,
   joinPathForCode,
   normalizeJoinCode,
+  peekPendingJoinCode,
+  storePendingJoinCode,
 } from "@/lib/company";
-import { getAuthErrorMessage } from "@/lib/firebase/auth";
+import {
+  getAuthErrorMessage,
+  recentGoogleRedirectAttempt,
+  usesRedirectGoogleSignIn,
+} from "@/lib/firebase/auth";
 import { validateJoinCode } from "@/lib/validation";
+
+let joinTask: Promise<boolean> | null = null;
+
+function stripSignInParam() {
+  const url = new URL(window.location.href);
+  if (!url.searchParams.has("signin")) return;
+  url.searchParams.delete("signin");
+  const next = `${url.pathname}${url.search}${url.hash}`;
+  History.prototype.replaceState.call(window.history, window.history.state, "", next);
+}
 
 type JoinCompanyFormProps = {
   initialCode?: string;
@@ -39,59 +57,72 @@ export function JoinCompanyForm({ initialCode = "" }: JoinCompanyFormProps) {
   const [error, setError] = useState<string | null>(null);
   const [joining, setJoining] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
-  const autoJoined = useRef(false);
+  const attemptedCode = useRef<string | null>(null);
+  const autoSignInStarted = useRef(false);
 
   const signedIn = Boolean(configured && user);
   const isManager = role === "ADMIN";
 
-  useEffect(() => {
-    if (!ready || loading || !user || role !== "EMPLOYEE") return;
-    if (hasJoinedCompany(user.uid)) {
+  async function completeJoin(nextCode = code, account: User | null = user) {
+    if (joinTask) return joinTask;
+
+    joinTask = (async () => {
+      if (!account) return false;
+      const invalid = validateJoinCode(nextCode);
+      if (invalid) {
+        setError(invalid);
+        return false;
+      }
+
+      setJoining(true);
+      setError(null);
+      const result = await joinCompanyWithCode({
+        userId: account.uid,
+        code: nextCode,
+        name: account.displayName ?? "Employee",
+        email: account.email ?? "",
+      });
+      setJoining(false);
+
+      if (!result.ok) {
+        setError(result.reason);
+        return false;
+      }
+
+      clearPendingJoinCode();
       router.replace("/employee");
-    }
-  }, [loading, ready, role, router, user]);
-
-  async function completeJoin(nextCode = code) {
-    if (!user) return false;
-    const invalid = validateJoinCode(nextCode);
-    if (invalid) {
-      setError(invalid);
-      return false;
-    }
-
-    setJoining(true);
-    setError(null);
-    const result = await joinCompanyWithCode({
-      userId: user.uid,
-      code: nextCode,
-      name: user.displayName ?? "Employee",
-      email: user.email ?? "",
+      return true;
+    })().finally(() => {
+      joinTask = null;
     });
-    setJoining(false);
 
-    if (!result.ok) {
-      setError(result.reason);
-      return false;
-    }
-
-    router.replace("/employee");
-    return true;
+    return joinTask;
   }
 
   useEffect(() => {
-    if (autoJoined.current) return;
-    if (!ready || loading || !user || isManager || joining) return;
-    if (hasJoinedCompany(user.uid)) return;
-    const fromLink = normalizeJoinCode(initialCode);
-    if (!fromLink) return;
-    autoJoined.current = true;
-    const timer = window.setTimeout(() => {
-      void completeJoin(fromLink);
-    }, 0);
-    return () => window.clearTimeout(timer);
-    // Invite links should attach as soon as Google auth is ready.
+    const pending = peekPendingJoinCode();
+    if (!pending) return;
+    setCode((current) =>
+      normalizeJoinCode(current) ? current : formatJoinCode(pending),
+    );
+  }, []);
+
+  useEffect(() => {
+    if (!ready || loading || !user || role === "ADMIN") return;
+
+    if (hasJoinedCompany(user.uid)) {
+      clearPendingJoinCode();
+      router.replace("/employee");
+      return;
+    }
+
+    const fromLink = normalizeJoinCode(initialCode) || peekPendingJoinCode();
+    if (!fromLink || attemptedCode.current === fromLink) return;
+    attemptedCode.current = fromLink;
+    void completeJoin(fromLink, user);
+    // Join as soon as Google auth returns with a code from the link or the last attempt.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, loading, user, isManager, initialCode]);
+  }, [initialCode, loading, ready, role, router, user]);
 
   async function handleGoogleSignIn() {
     setError(null);
@@ -110,16 +141,45 @@ export function JoinCompanyForm({ initialCode = "" }: JoinCompanyFormProps) {
       return;
     }
 
+    const nextPath = joinPathForCode(code);
+    storePendingJoinCode(code);
     setRole("EMPLOYEE");
+
+    if (usesRedirectGoogleSignIn() && window.location.pathname !== nextPath) {
+      window.location.assign(`${nextPath}?signin=1`);
+      return;
+    }
+
+    if (usesRedirectGoogleSignIn()) {
+      stripSignInParam();
+    }
+
     setGoogleLoading(true);
     try {
-      await signInWithGoogle("EMPLOYEE", joinPathForCode(code));
+      const signedInUser = await signInWithGoogle("EMPLOYEE", nextPath);
+      if (signedInUser) {
+        await completeJoin(normalizeJoinCode(code), signedInUser);
+      }
     } catch (authError) {
       setError(getAuthErrorMessage(authError));
     } finally {
       setGoogleLoading(false);
     }
   }
+
+  const startGoogleJoinRef = useRef(handleGoogleSignIn);
+  startGoogleJoinRef.current = handleGoogleSignIn;
+
+  useEffect(() => {
+    if (autoSignInStarted.current || !ready || loading || user) return;
+    if (!usesRedirectGoogleSignIn()) return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("signin") !== "1") return;
+    if (recentGoogleRedirectAttempt()) return;
+    if (validateJoinCode(code)) return;
+    autoSignInStarted.current = true;
+    void startGoogleJoinRef.current();
+  }, [code, loading, ready, user]);
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();

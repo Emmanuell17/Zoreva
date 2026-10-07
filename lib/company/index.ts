@@ -7,12 +7,15 @@ import type { Role } from "@/types";
 export { SETUP_PATH, JOIN_PATH, LOCAL_OWNER_ID, defaultShiftTemplates, templateDefaults } from "@/lib/company/defaults";
 export { hasCompletedSetup, hasJoinedCompany } from "@/lib/company/persistence";
 export {
+  clearPendingJoinCode,
   formatJoinCode,
   inviteUrlForCode,
   isJoinPath,
   joinCodeFromPath,
   joinPathForCode,
   normalizeJoinCode,
+  peekPendingJoinCode,
+  storePendingJoinCode,
 } from "@/lib/company/join-code";
 export {
   activateDemoWorkspace,

@@ -44,3 +44,22 @@ export function joinCodeFromPath(path: string | null | undefined): string {
   const match = path.match(/^\/join\/([^/?#]+)/);
   return match ? normalizeJoinCode(decodeURIComponent(match[1])) : "";
 }
+
+const PENDING_JOIN_KEY = "zoreva:pendingJoinCode";
+
+export function storePendingJoinCode(value: string) {
+  if (typeof window === "undefined") return;
+  const code = normalizeJoinCode(value);
+  if (!code) return;
+  window.localStorage.setItem(PENDING_JOIN_KEY, code);
+}
+
+export function peekPendingJoinCode(): string {
+  if (typeof window === "undefined") return "";
+  return normalizeJoinCode(window.localStorage.getItem(PENDING_JOIN_KEY) ?? "");
+}
+
+export function clearPendingJoinCode() {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem(PENDING_JOIN_KEY);
+}
