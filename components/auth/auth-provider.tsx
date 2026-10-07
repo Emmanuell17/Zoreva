@@ -21,9 +21,11 @@ import { onAuthStateChanged, type User } from "firebase/auth";
 import {
   clearStoredRole,
   completeGoogleRedirect,
+  consumeAwaitingGoogleRedirect,
   getAuthErrorMessage,
   getStoredRole,
   homePathForRole,
+  isIpAddress,
   peekPendingRole,
   setStoredRole,
   startGoogleSignIn,
@@ -45,7 +47,7 @@ type AuthContextValue = {
   signInWithGoogle: (
     role?: Role,
     returnTo?: string,
-  ) => Promise<string | null>;
+  ) => Promise<User | null>;
   signOut: () => Promise<void>;
   setRole: (role: Role) => void;
   clearRedirectError: () => void;
@@ -115,15 +117,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     let unsubscribe = () => {};
 
     async function init() {
+      let redirectResult: Awaited<ReturnType<typeof completeGoogleRedirect>> =
+        null;
+      let redirectFailed = false;
       try {
-        await completeGoogleRedirect();
+        redirectResult = await completeGoogleRedirect();
       } catch (error) {
+        redirectFailed = true;
         if (!cancelled) {
           setRedirectError(getAuthErrorMessage(error));
         }
       }
 
       if (cancelled) return;
+
+      const returnedWithoutSession =
+        consumeAwaitingGoogleRedirect() && !redirectResult && !redirectFailed;
+      let announcedReturnFailure = false;
 
       unsubscribe = onAuthStateChanged(auth, (nextUser) => {
         const pendingRole = nextUser ? peekPendingRole() : null;
@@ -136,6 +146,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setRoleState(nextRole);
           setLoading(false);
           setReady(true);
+          if (nextUser) {
+            setRedirectError(null);
+            return;
+          }
+          if (returnedWithoutSession && !announcedReturnFailure) {
+            announcedReturnFailure = true;
+            const host = window.location.hostname;
+            setRedirectError(
+              isIpAddress(host)
+                ? getAuthErrorMessage({ code: "auth/unauthorized-domain" })
+                : "Google sign-in didn't finish. Try again and choose an account.",
+            );
+          }
         })();
       });
     }
@@ -170,7 +193,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setRoleState(result.role);
           setLoading(false);
           setReady(true);
-          return result.returnTo;
+          return result.user;
         }
 
         return null;
