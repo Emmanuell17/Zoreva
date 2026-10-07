@@ -16,7 +16,7 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Zoreva",
   description:
-    "Choose shifts, confirm, and enter hours — alongside your existing factory process.",
+    "Workers choose a shift, confirm they are coming, and enter hours. Managers see who signed up.",
 };
 
 export const viewport: Viewport = {

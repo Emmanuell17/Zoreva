@@ -1,190 +1,79 @@
 import Link from "next/link";
 
-const shifts = [
-  { day: "Mon", label: "Morning", top: "28%", left: "8%", width: "18%" },
-  { day: "Tue", label: "Afternoon", top: "44%", left: "28%", width: "16%" },
-  { day: "Wed", label: "Morning", top: "32%", left: "48%", width: "20%" },
-  { day: "Thu", label: "Afternoon", top: "52%", left: "12%", width: "22%" },
-  { day: "Fri", label: "Morning", top: "38%", left: "62%", width: "18%" },
-  { day: "Sat", label: "Afternoon", top: "58%", left: "40%", width: "24%" },
+const steps = [
+  {
+    title: "Choose",
+    body: "Pick an open shift from your phone.",
+  },
+  {
+    title: "Confirm",
+    body: "Say you are coming before it starts.",
+  },
+  {
+    title: "Hours",
+    body: "Enter the time you worked after the shift.",
+  },
 ];
 
 export function LandingPage() {
   return (
-    <div className="flex min-h-full flex-1 flex-col">
-      <section className="relative flex min-h-dvh flex-col overflow-hidden">
-        <div
-          aria-hidden
-          className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top,_rgba(39,39,42,0.55),_transparent_55%),linear-gradient(180deg,#0a0a0a_0%,#050505_100%)]"
-        />
-        <div
-          aria-hidden
-          className="animate-[grid-drift_28s_linear_infinite] pointer-events-none absolute inset-[-10%] opacity-40 [background-image:linear-gradient(rgba(63,63,70,0.35)_1px,transparent_1px),linear-gradient(90deg,rgba(63,63,70,0.35)_1px,transparent_1px)] [background-size:48px_48px]"
-        />
-        <div
-          aria-hidden
-          className="animate-[soft-pulse_6s_ease-in-out_infinite] pointer-events-none absolute inset-x-0 bottom-0 h-[36%] bg-[linear-gradient(180deg,transparent,rgba(10,10,10,0.2)_20%,rgba(10,10,10,0.92))] sm:h-[42%]"
-        />
+    <div className="relative flex min-h-dvh flex-1 flex-col">
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_80%_50%_at_50%_-10%,rgba(255,255,255,0.07),transparent)]"
+      />
 
-        <div
-          aria-hidden
-          className="pointer-events-none absolute inset-x-0 bottom-0 h-[34%] sm:h-[42%]"
+      <header className="relative z-10 flex items-center justify-between px-6 py-5 sm:px-10">
+        <p className="text-sm font-medium tracking-tight">Zoreva</p>
+        <Link
+          href="/login"
+          className="inline-flex min-h-10 items-center text-sm text-zinc-400 transition-colors hover:text-foreground"
         >
-          <div className="absolute inset-0 border-t border-zinc-800/80 bg-zinc-950/40 backdrop-blur-[1px]">
-            <div className="grid h-9 grid-cols-7 border-b border-zinc-800/80 text-[9px] uppercase tracking-[0.14em] text-zinc-600 sm:h-10 sm:text-xs sm:tracking-[0.18em]">
-              {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((day) => (
-                <div
-                  key={day}
-                  className="flex items-center justify-center border-r border-zinc-800/60 last:border-r-0"
-                >
-                  <span className="sm:hidden">{day.slice(0, 1)}</span>
-                  <span className="hidden sm:inline">{day}</span>
-                </div>
-              ))}
-            </div>
-            <div className="relative hidden h-[calc(100%-2.5rem)] sm:block">
-              {shifts.map((shift) => (
-                <div
-                  key={`${shift.day}-${shift.label}`}
-                  className="absolute rounded-sm border border-zinc-700/70 bg-zinc-900/80 px-2 py-1.5 text-[10px] text-zinc-400 sm:text-xs"
-                  style={{
-                    top: shift.top,
-                    left: shift.left,
-                    width: shift.width,
-                  }}
-                >
-                  <span className="block font-medium text-zinc-300">
-                    {shift.label}
-                  </span>
-                  <span className="text-zinc-600">{shift.day}</span>
-                </div>
-              ))}
-            </div>
-            <div className="relative grid h-[calc(100%-2.25rem)] grid-cols-3 gap-2 p-3 sm:hidden">
-              {shifts.slice(0, 3).map((shift) => (
-                <div
-                  key={`mobile-${shift.day}-${shift.label}`}
-                  className="rounded-sm border border-zinc-700/70 bg-zinc-900/80 px-2 py-2 text-[10px] text-zinc-400"
-                >
-                  <span className="block font-medium text-zinc-300">
-                    {shift.label}
-                  </span>
-                  <span className="text-zinc-600">{shift.day}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
+          Log in
+        </Link>
+      </header>
 
-        <header className="relative z-10 flex items-center justify-end px-5 py-5 sm:px-10">
-          <Link
-            href="/login"
-            className="inline-flex min-h-10 items-center text-sm text-zinc-400 transition-colors hover:text-foreground"
-          >
-            Log in
-          </Link>
-        </header>
-
-        <div className="relative z-10 flex flex-1 flex-col justify-start px-5 pb-[38vh] pt-12 sm:px-10 sm:pb-[46vh] sm:pt-24">
-          <p className="animate-[fade-up_0.75s_ease-out_both] font-mono text-[2rem] font-semibold tracking-[0.14em] text-foreground uppercase sm:text-5xl sm:tracking-[0.22em] md:text-6xl">
-            Zoreva
-          </p>
-          <h1 className="animate-[fade-up_0.75s_ease-out_0.12s_both] mt-5 max-w-xl text-xl font-medium tracking-tight text-zinc-100 sm:mt-6 sm:text-3xl">
-            Choose. Confirm. Enter hours.
+      <main className="relative z-10 mx-auto flex w-full max-w-3xl flex-1 flex-col justify-center px-6 py-12 sm:px-10 sm:py-16">
+        <div className="animate-[fade-up_0.7s_ease-out_both]">
+          <h1 className="max-w-xl text-[2.35rem] leading-[1.08] font-medium tracking-tight text-balance sm:text-6xl sm:leading-[1.05]">
+            Shifts, confirmations, and hours in one place.
           </h1>
-          <p className="animate-[fade-up_0.75s_ease-out_0.22s_both] mt-4 max-w-md text-sm leading-relaxed text-zinc-400 sm:mt-6 sm:text-base">
-            A simple shift app that works next to Facebook, paper forms, and
-            your payment website — not instead of them.
+          <p className="mt-5 max-w-lg text-base leading-relaxed text-zinc-400 sm:mt-6 sm:text-lg">
+            Workers choose a shift and confirm they are coming. After the
+            shift they enter hours. Managers see who signed up and what was
+            submitted.
           </p>
-          <div className="animate-[fade-up_0.75s_ease-out_0.34s_both] mt-8 flex w-full flex-col gap-3 sm:mt-10 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center">
+
+          <div className="mt-8 flex flex-col gap-3 sm:mt-10 sm:flex-row sm:items-center">
             <Link
               href="/register"
-              className="inline-flex h-11 w-full items-center justify-center rounded-md bg-foreground px-5 text-sm font-medium text-background transition-colors hover:bg-zinc-200 sm:w-auto"
+              className="inline-flex h-11 items-center justify-center rounded-full bg-foreground px-5 text-sm font-medium text-background transition-colors hover:bg-zinc-200"
             >
               Get started
             </Link>
             <Link
-              href="/login"
-              className="inline-flex h-11 w-full items-center justify-center rounded-md border border-zinc-700 px-5 text-sm font-medium text-foreground transition-colors hover:bg-zinc-900 sm:w-auto"
-            >
-              Log in
-            </Link>
-            <Link
               href="/join"
-              className="inline-flex h-11 w-full items-center justify-center rounded-md border border-zinc-700 px-5 text-sm font-medium text-foreground transition-colors hover:bg-zinc-900 sm:w-auto"
+              className="inline-flex h-11 items-center justify-center rounded-full border border-zinc-700 px-5 text-sm font-medium transition-colors hover:bg-zinc-900"
             >
               Join a team
             </Link>
           </div>
         </div>
-      </section>
 
-      <section className="border-t border-zinc-800 px-5 py-16 sm:px-10 sm:py-24">
-        <div className="mx-auto max-w-3xl">
-          <h2 className="text-2xl font-medium tracking-tight text-foreground sm:text-3xl">
-            Built for the factory floor.
-          </h2>
-          <p className="mt-4 max-w-2xl text-sm leading-relaxed text-zinc-400 sm:text-base">
-            Large buttons. Plain language. Fast on a phone. Workers choose a
-            shift, get a reminder, confirm they are coming, then enter hours
-            after the shift.
-          </p>
-        </div>
-      </section>
-
-      <section className="border-t border-zinc-800 px-5 py-16 sm:px-10 sm:py-24">
-        <div className="mx-auto grid max-w-3xl gap-10 sm:grid-cols-2 sm:gap-12">
-          <div>
-            <h2 className="text-xl font-medium tracking-tight text-foreground">
-              For employees
-            </h2>
-            <p className="mt-3 text-sm leading-relaxed text-zinc-400">
-              Choose a shift, confirm you are coming, see your schedule, and
-              enter hours after you work.
-            </p>
-          </div>
-          <div>
-            <h2 className="text-xl font-medium tracking-tight text-foreground">
-              For admins
-            </h2>
-            <p className="mt-3 text-sm leading-relaxed text-zinc-400">
-              Create shifts, see who chose and who confirmed, then review hours
-              against paper records.
-            </p>
-          </div>
-        </div>
-      </section>
-
-      <section className="border-t border-zinc-800 px-5 py-16 sm:px-10 sm:py-24">
-        <div className="mx-auto max-w-3xl">
-          <h2 className="text-2xl font-medium tracking-tight text-foreground sm:text-3xl">
-            Start with one extra step.
-          </h2>
-          <p className="mt-4 max-w-xl text-sm leading-relaxed text-zinc-400 sm:text-base">
-            Keep your current process. Add this app next to it so digital
-            records are useful from day one.
-          </p>
-          <div className="mt-8">
-            <Link
-              href="/register"
-              className="inline-flex h-11 w-full items-center justify-center rounded-md bg-foreground px-5 text-sm font-medium text-background transition-colors hover:bg-zinc-200 sm:w-auto"
-            >
-              Create account
-            </Link>
-          </div>
-        </div>
-      </section>
-
-      <footer className="border-t border-zinc-800 px-5 py-8 sm:px-10">
-        <div className="mx-auto flex max-w-3xl flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-          <p className="font-mono text-xs tracking-[0.2em] text-zinc-600 uppercase">
-            Zoreva
-          </p>
-          <p className="text-xs text-zinc-600">
-            Shift selection, confirmation, and hours
-          </p>
-        </div>
-      </footer>
+        <ol className="mt-16 grid gap-8 border-t border-zinc-800 pt-8 sm:mt-20 sm:grid-cols-3 sm:gap-10">
+          {steps.map((step, index) => (
+            <li key={step.title}>
+              <p className="font-mono text-xs tracking-wide text-zinc-500">
+                {String(index + 1).padStart(2, "0")}
+              </p>
+              <h2 className="mt-3 text-sm font-medium">{step.title}</h2>
+              <p className="mt-1.5 text-sm leading-relaxed text-zinc-400">
+                {step.body}
+              </p>
+            </li>
+          ))}
+        </ol>
+      </main>
     </div>
   );
 }
