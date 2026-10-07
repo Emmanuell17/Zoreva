@@ -24,14 +24,14 @@ export function AdminHistoryPanel() {
     <div>
       <PageHeader
         title="History"
-        description="Past shifts, who worked, and the hours they entered."
+        description="Finished shifts from today. Earlier dates are removed."
       />
 
       <ShiftCardList
         loading={loading}
         empty={past.length === 0}
         emptyTitle="No past shifts yet"
-        emptyDescription="Finished shifts will collect here."
+        emptyDescription="A finished shift stays here until the day is over."
       >
         {past.map((shift) => {
           const people = signupsForShift(signups, shift.id);

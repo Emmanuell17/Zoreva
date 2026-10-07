@@ -28,6 +28,7 @@ import {
 } from "@/lib/company/persistence";
 import { normalizeJoinCode } from "@/lib/company/join-code";
 import { normalizeEmail } from "@/lib/company/email";
+import { isShiftDatePassed } from "@/lib/shift-utils";
 import { buildCompanyWorkspace } from "@/lib/company/build-workspace";
 import type {
   Company,
@@ -74,6 +75,36 @@ function demoSchedule(): ScheduleState {
 function stopWatch() {
   remoteUnsub?.();
   remoteUnsub = null;
+  if (typeof document !== "undefined") {
+    document.removeEventListener("visibilitychange", onWorkspaceVisible);
+  }
+}
+
+function withoutPassedShifts(company: Company, now = new Date()): Company | null {
+  const expired = new Set(
+    company.shifts
+      .filter((shift) => isShiftDatePassed(shift.date, now))
+      .map((shift) => shift.id),
+  );
+  if (expired.size === 0) return null;
+
+  return {
+    ...company,
+    shifts: company.shifts.filter((shift) => !expired.has(shift.id)),
+    signups: company.signups.filter((signup) => !expired.has(signup.shiftId)),
+    hours: company.hours.filter((entry) => !expired.has(entry.shiftId)),
+  };
+}
+
+function dropPassedShifts() {
+  if (!activeCompany || applyingSchedule) return;
+  const next = withoutPassedShifts(activeCompany);
+  if (!next) return;
+  applyCompany(next, { persist: true });
+}
+
+function onWorkspaceVisible() {
+  if (document.visibilityState === "visible") dropPassedShifts();
 }
 
 function startWatch(companyId: string) {
@@ -84,6 +115,9 @@ function startWatch(companyId: string) {
     saveCompanyLocal(company);
     applyCompany(company, { persist: false });
   });
+  if (typeof document !== "undefined") {
+    document.addEventListener("visibilitychange", onWorkspaceVisible);
+  }
 }
 
 export function subscribeCompany(listener: () => void) {
@@ -128,26 +162,28 @@ function applyCompany(
   company: Company | null,
   options?: { persist?: boolean; employeeId?: string },
 ) {
-  activeCompany = company;
+  const pruned = company ? withoutPassedShifts(company) : null;
+  const next = pruned ?? company;
+  activeCompany = next;
   currentEmployeeId = options?.employeeId ?? currentEmployeeId;
-  if (!company) {
+  if (!next) {
     currentEmployeeId = CURRENT_EMPLOYEE_ID;
   }
 
   applyingSchedule = true;
   scheduleBridge?.load(
-    company
+    next
       ? {
-          shifts: company.shifts.map((shift) => ({ ...shift })),
-          signups: company.signups.map((signup) => ({ ...signup })),
-          hours: company.hours.map((entry) => ({ ...entry })),
+          shifts: next.shifts.map((shift) => ({ ...shift })),
+          signups: next.signups.map((signup) => ({ ...signup })),
+          hours: next.hours.map((entry) => ({ ...entry })),
         }
       : demoSchedule(),
   );
   applyingSchedule = false;
 
-  if (company && options?.persist !== false) {
-    saveCompany(company);
+  if (next && (pruned || options?.persist !== false)) {
+    saveCompany(next);
   }
 
   notify();

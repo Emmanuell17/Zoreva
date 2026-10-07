@@ -42,6 +42,13 @@ export function shiftDateTime(shift: Pick<Shift, "date" | "startTime" | "endTime
   return date;
 }
 
+export function isShiftDatePassed(
+  date: string | Date,
+  now = new Date(),
+): boolean {
+  return calendarDayKey(date) < calendarDayKey(now);
+}
+
 export function isUpcomingShift(shift: Shift, now = new Date()): boolean {
   return startOfDay(toDate(shift.date)) >= startOfDay(now);
 }
