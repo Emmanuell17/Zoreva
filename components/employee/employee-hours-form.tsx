@@ -76,10 +76,6 @@ function HoursFormInner({
       description={`${formatDayLabel(shift.date)} · ${formatTimeRange(shift.startTime, shift.endTime)}`}
     >
       <div className="flex flex-col gap-4">
-        <p className="text-xs leading-relaxed text-zinc-500">
-          Fill in the paper form first, then enter the same hours here.
-        </p>
-
         {custom ? (
           <>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">

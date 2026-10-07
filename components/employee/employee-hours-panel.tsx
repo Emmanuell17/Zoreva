@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { EmployeeHoursForm } from "@/components/employee/employee-hours-form";
 import { PageHeader } from "@/components/layout/page-header";
-import { ProcessNote } from "@/components/layout/process-note";
 import { ShiftCard } from "@/components/shifts/shift-card";
 import { ShiftCardList } from "@/components/shifts/shift-card-list";
 import { Badge } from "@/components/ui/badge";
@@ -18,14 +17,8 @@ import {
   hoursForSignup,
   isPastShift,
 } from "@/lib/shift-utils";
-import { formatTimeRange, getHoursStatusLabel } from "@/lib/utils";
-import type { HoursStatus, Shift } from "@/types";
-
-const hoursVariant: Record<HoursStatus, "pending" | "confirmed" | "warning"> = {
-  SUBMITTED: "pending",
-  APPROVED: "confirmed",
-  CHECK_PAPER: "warning",
-};
+import { formatTimeRange } from "@/lib/utils";
+import type { Shift } from "@/types";
 
 export function EmployeeHoursPanel() {
   const loading = useInitialLoading();
@@ -55,15 +48,8 @@ export function EmployeeHoursPanel() {
     <div>
       <PageHeader
         title="Hours"
-        description="Enter hours after the shift. Then continue payment on the usual website."
+        description="Enter the hours you worked after a shift ends."
       />
-
-      <div className="mb-6">
-        <ProcessNote>
-          Still complete the paper form. Enter the same hours here so your admin
-          can compare. Payment stays on the existing website.
-        </ProcessNote>
-      </div>
 
       <div className="grid gap-8">
         <section>
@@ -133,9 +119,7 @@ export function EmployeeHoursPanel() {
                 label={shift.label}
                 badges={
                   entry ? (
-                    <Badge variant={hoursVariant[entry.status]}>
-                      {getHoursStatusLabel(entry.status)}
-                    </Badge>
+                    <Badge variant="pending">Submitted</Badge>
                   ) : null
                 }
                 meta={

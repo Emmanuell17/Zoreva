@@ -1,4 +1,4 @@
-import type { HoursStatus, SignupStatus } from "@/types";
+import type { SignupStatus } from "@/types";
 import { toDate } from "@/lib/shift-utils";
 
 export function formatDate(date: Date | string): string {
@@ -33,17 +33,6 @@ export function formatTimeRange(startTime: string, endTime: string): string {
 
 export function getSignupStatusLabel(status: SignupStatus): string {
   return status === "CONFIRMED" ? "Confirmed" : "Not confirmed";
-}
-
-export function getHoursStatusLabel(status: HoursStatus): string {
-  switch (status) {
-    case "SUBMITTED":
-      return "Submitted";
-    case "APPROVED":
-      return "Approved";
-    case "CHECK_PAPER":
-      return "Check paper";
-  }
 }
 
 export function cn(

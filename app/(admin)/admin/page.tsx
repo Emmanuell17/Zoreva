@@ -1,5 +1,5 @@
-import { AdminDashboard } from "@/components/admin/admin-dashboard";
+import { AdminShiftsPanel } from "@/components/admin/admin-shifts-panel";
 
 export default function AdminHomePage() {
-  return <AdminDashboard />;
+  return <AdminShiftsPanel />;
 }

@@ -2,7 +2,7 @@
 
 **Choose a shift. Confirm attendance. Enter hours.**
 
-Zoreva is a mobile-first shift coordination app for teams that still run on chat groups, paper timesheets, and a separate payroll site. It does not try to replace that process. It sits next to it and gives managers a digital record of who picked a shift, who confirmed, and which hours were submitted.
+Zoreva is a mobile-first shift coordination app. Managers open shifts. Employees choose one, confirm they are coming, and enter hours after the shift.
 
 Frontend MVP built with **Next.js 16**, **React 19**, **TypeScript**, **Tailwind CSS 4**, and **Firebase Authentication**.
 
@@ -12,17 +12,13 @@ Frontend MVP built with **Next.js 16**, **React 19**, **TypeScript**, **Tailwind
 
 ## Why it exists
 
-Shift teams often know who is supposed to work, but not who has actually committed. Hours still live on paper. Tools that demand a full payroll or HRIS replacement fail in that environment.
-
-Zoreva is designed as a **companion workflow**:
+Shift teams often know who is supposed to work, but not who has actually committed.
 
 1. A manager opens shifts for a day.
 2. Employees choose a shift on their phone.
 3. The app reminds them to confirm before the shift starts.
 4. After the shift, they enter hours in the same place.
-5. The manager reviews confirmations and hours against the existing paper/payroll process.
-
-Digital records are useful on day one, even while Facebook, paper forms, and payment stay in place.
+5. The manager sees who confirmed and which hours were entered.
 
 ---
 
@@ -42,8 +38,8 @@ Digital records are useful on day one, even while Facebook, paper forms, and pay
 - Get an isolated workspace per manager account
 - Create, edit, and remove upcoming shifts (with presets for common factory windows)
 - See who selected vs who confirmed
-- Review submitted hours (`submitted` / `approved` / `check paper`)
-- Look at basic history without leaving the existing payment process
+- See the hours employees entered
+- Look at past shifts and the hours recorded for them
 
 ### Constraints the UI actually enforces
 
@@ -66,7 +62,7 @@ This is a portfolio product, not a production multi-tenant SaaS. It is written s
 
 | Area | What you will find |
 | --- | --- |
-| Product sense | Companion-to-legacy design instead of “replace the factory” |
+| Product sense | Phone-first flow: choose a shift, confirm, enter hours |
 | Frontend architecture | Next.js App Router, role-based route groups, shared UI primitives |
 | Domain modeling | Shifts, signups, hours, companies, templates as typed entities |
 | State | In-memory store + `useSyncExternalStore`, persisted per company in `localStorage` |
@@ -176,7 +172,7 @@ npm run start
 **In this MVP**
 
 - Employee choose → confirm → schedule → hours
-- Manager setup, shift CRUD, confirmation overview, hours review
+- Manager setup, shift CRUD, confirmation overview, submitted hours
 - Firebase Google authentication
 - In-app reminders derived from live shift state
 - Per-manager workspaces in the browser
@@ -187,7 +183,7 @@ npm run start
 - Server-side database or REST API
 - Server-side role and tenancy (roles are client-side today)
 - Email or push delivery
-- Integrations with Facebook, paper, or payroll (those stay as they are)
+- Payroll or chat integrations
 
 The next production step is a real backend behind the existing schedule service: persist companies, shifts, signups, and hours, and move role storage off the client.
 

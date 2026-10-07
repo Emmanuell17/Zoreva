@@ -50,7 +50,7 @@ export function isShiftDatePassed(
 }
 
 export function isUpcomingShift(shift: Shift, now = new Date()): boolean {
-  return startOfDay(toDate(shift.date)) >= startOfDay(now);
+  return !isPastShift(shift, now);
 }
 
 export function isTodayShift(shift: Shift, now = new Date()): boolean {

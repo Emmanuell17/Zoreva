@@ -10,10 +10,11 @@ const nextConfig: NextConfig = {
   },
   async redirects() {
     return [
+      { source: "/admin/shifts", destination: "/admin", permanent: false },
       { source: "/manager", destination: "/admin", permanent: false },
-      { source: "/manager/shifts", destination: "/admin/shifts", permanent: false },
+      { source: "/manager/shifts", destination: "/admin", permanent: false },
       { source: "/manager/swaps", destination: "/admin/hours", permanent: false },
-      { source: "/manager/availability", destination: "/admin/shifts", permanent: false },
+      { source: "/manager/availability", destination: "/admin", permanent: false },
       { source: "/manager/employees", destination: "/admin", permanent: false },
       { source: "/manager/:path*", destination: "/admin", permanent: false },
       { source: "/employee/availability", destination: "/employee/choose", permanent: false },

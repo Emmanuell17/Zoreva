@@ -2,7 +2,7 @@ export type Role = "EMPLOYEE" | "ADMIN";
 
 export type SignupStatus = "SELECTED" | "CONFIRMED";
 
-export type HoursStatus = "SUBMITTED" | "APPROVED" | "CHECK_PAPER";
+export type HoursStatus = "SUBMITTED";
 
 export type User = {
   id: string;
@@ -67,7 +67,7 @@ export type Shift = {
   createdAt?: string | Date;
 };
 
-export type ShiftSignup = {
+export type ShiftSignup = { //records who signed up for a shift
   id: string;
   shiftId: string;
   employeeId: string;
@@ -76,7 +76,7 @@ export type ShiftSignup = {
   confirmedAt?: string | Date | null;
 };
 
-export type HoursEntry = {
+export type HoursEntry = { //records the hours worked for a shift
   id: string;
   shiftId: string;
   employeeId: string;
@@ -85,12 +85,11 @@ export type HoursEntry = {
   note?: string | null;
   status: HoursStatus;
   submittedAt: string | Date;
-  reviewedAt?: string | Date | null;
 };
 
 export type ReminderKind = "CONFIRM" | "HOURS" | "SHIFT";
 
-export type AppNotification = {
+export type AppNotification = { //notifications for the app
   id: string;
   title: string;
   body: string;

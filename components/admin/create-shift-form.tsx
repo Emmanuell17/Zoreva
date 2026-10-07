@@ -5,7 +5,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
 import { useSchedule } from "@/hooks/use-schedule";
-import { updateShiftTemplateTimes } from "@/lib/company/store";
 import { getShiftPresets } from "@/lib/shift-presets";
 import { calendarDayKey, isSameShiftSlot, signupsForShift } from "@/lib/shift-utils";
 import { cn } from "@/lib/utils";
@@ -20,10 +19,7 @@ import {
   type FieldErrors,
 } from "@/lib/validation";
 import type { CreateShiftInput } from "@/lib/services/schedule";
-import {
-  getScheduleSnapshot,
-  keepOnlySelectedShiftsOnDays,
-} from "@/lib/services/schedule";
+import { getScheduleSnapshot } from "@/lib/services/schedule";
 import type { Shift } from "@/types";
 
 type CreateShiftFormProps = {
@@ -183,28 +179,6 @@ export function CreateShiftForm({
     setPresetTimeErrors({});
   }
 
-  function updatePresetTime(
-    label: string,
-    key: "startTime" | "endTime",
-    value: string,
-  ) {
-    const current = presetTimes[label] ?? {
-      startTime: presets.find((item) => item.label === label)?.startTime ?? "08:00",
-      endTime: presets.find((item) => item.label === label)?.endTime ?? "16:00",
-    };
-    const nextTimes = { ...current, [key]: value };
-    setPresetTimes((existing) => ({
-      ...existing,
-      [label]: nextTimes,
-    }));
-    const range = validateTimeRange(nextTimes.startTime, nextTimes.endTime);
-    setPresetTimeErrors((existing) => ({
-      ...existing,
-      [`${label}-startTime`]: range.startTime ?? "",
-      [`${label}-endTime`]: range.endTime ?? "",
-    }));
-  }
-
   function validateSelectedPresetTimes() {
     const next: Record<string, string> = {};
     for (const label of selectedPresets) {
@@ -343,7 +317,7 @@ export function CreateShiftForm({
               date,
               startTime: preset.startTime,
               endTime: preset.endTime,
-              slots: preset.slots || slots,
+              slots,
               label: preset.label,
               note,
               positions: roles,
@@ -361,17 +335,6 @@ export function CreateShiftForm({
             },
           ];
 
-    if (!editing && selectedTimes.length > 0) {
-      updateShiftTemplateTimes(
-        selectedTimes.map((preset) => ({
-          name: preset.label,
-          startTime: preset.startTime,
-          endTime: preset.endTime,
-        })),
-      );
-      keepOnlySelectedShiftsOnDays(dates, inputs);
-    }
-
     const currentShifts = getScheduleSnapshot().shifts;
     const fresh = inputs.filter(
       (input) => !currentShifts.some((item) => isSameShiftSlot(item, input)),
@@ -379,7 +342,12 @@ export function CreateShiftForm({
     const duplicateCount = inputs.length - fresh.length;
 
     if (severalDays || selectedTimes.length > 0) {
-      if (fresh.length > 0) onCreate(fresh);
+      if (fresh.length === 0) {
+        setNotice("Those shifts are already on the week.");
+        setSubmitting(false);
+        return;
+      }
+      onCreate(fresh);
       handleClose();
       return;
     }
@@ -418,45 +386,10 @@ export function CreateShiftForm({
       description={
         editing
           ? "Change the day, time, name, or how many people are needed."
-          : "Add one shift, or a whole week in one go."
+          : "Pick the days, then tap the shifts to open."
       }
     >
       <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-4">
-        {editing ? null : (
-        <div className="grid grid-cols-2 gap-2">
-          <button
-            type="button"
-            onClick={() => {
-              setSeveralDays(false);
-              setForm((current) => ({ ...current, date: todayDate() }));
-            }}
-            className={cn(
-              "rounded-md border px-3 py-2 text-sm",
-              !severalDays
-                ? "border-zinc-500 bg-zinc-900 text-foreground"
-                : "border-border text-zinc-400",
-            )}
-          >
-            One day
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setSeveralDays(true);
-              setSelectedDays(days.map((day) => day.value));
-            }}
-            className={cn(
-              "rounded-md border px-3 py-2 text-sm",
-              severalDays
-                ? "border-zinc-500 bg-zinc-900 text-foreground"
-                : "border-border text-zinc-400",
-            )}
-          >
-            Several days
-          </button>
-        </div>
-        )}
-
         {editing ? (
           <>
             <Input
@@ -495,146 +428,64 @@ export function CreateShiftForm({
           </>
         ) : (
           <>
-            {severalDays ? (
-              <div className="flex flex-col gap-1.5">
-                <p className="text-xs font-medium text-zinc-400">Days</p>
-                <div className="grid grid-cols-2 gap-2">
-                  {days.map((day) => {
-                    const selected = selectedDays.includes(day.value);
-                    return (
-                      <button
-                        key={day.value}
-                        type="button"
-                        onClick={() => toggleDay(day.value)}
-                        className={cn(
-                          "rounded-md border px-3 py-2 text-left text-sm",
-                          selected
-                            ? "border-zinc-500 bg-zinc-900 text-foreground"
-                            : "border-border text-zinc-400",
-                        )}
-                      >
-                        {day.label}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            ) : (
-              <Input
-                label="Date"
-                name="date"
-                type="date"
-                value={form.date}
-                error={touched.date ? errors.date : undefined}
-                onChange={(event) => updateField("date", event.target.value)}
-                onBlur={() => setTouched((current) => ({ ...current, date: true }))}
-              />
-            )}
             <div className="flex flex-col gap-1.5">
-              <p className="text-xs font-medium text-zinc-400">
-                {severalDays ? "Shifts each day" : "Shifts"}
-              </p>
-              <p className="text-xs text-zinc-600">
-                Tap the shifts you want, then set the hours for each one. Other
-                empty times on {severalDays ? "these days" : "this day"} are
-                removed.
-              </p>
-              <div className="flex flex-col gap-2">
-                {presets.map((preset) => {
-                  const selected = selectedPresets.includes(preset.label);
-                  const times = presetTimes[preset.label] ?? preset;
+              <p className="text-xs font-medium text-zinc-400">Days</p>
+              <div className="grid grid-cols-2 gap-2">
+                {days.map((day) => {
+                  const selected = selectedDays.includes(day.value);
                   return (
-                    <div
-                      key={preset.label}
+                    <button
+                      key={day.value}
+                      type="button"
+                      onClick={() => toggleDay(day.value)}
                       className={cn(
-                        "rounded-md border px-3 py-2",
+                        "rounded-md border px-3 py-2 text-left text-sm",
                         selected
-                          ? "border-zinc-500 bg-zinc-900"
-                          : "border-border",
+                          ? "border-zinc-500 bg-zinc-900 text-foreground"
+                          : "border-border text-zinc-400",
                       )}
                     >
-                      <button
-                        type="button"
-                        onClick={() => togglePreset(preset.label)}
-                        className={cn(
-                          "w-full text-left text-sm",
-                          selected ? "text-foreground" : "text-zinc-400",
-                        )}
-                      >
-                        <span className="block font-medium">{preset.label}</span>
-                        <span className="mt-0.5 block text-xs text-zinc-500">
-                          {times.startTime} – {times.endTime}
-                        </span>
-                      </button>
-                      {selected ? (
-                        <div className="mt-3 grid grid-cols-2 gap-2">
-                          <Input
-                            label="Start"
-                            name={`${preset.label}-startTime`}
-                            type="time"
-                            value={times.startTime}
-                            error={
-                              presetTimeErrors[`${preset.label}-startTime`] ||
-                              undefined
-                            }
-                            onChange={(event) =>
-                              updatePresetTime(
-                                preset.label,
-                                "startTime",
-                                event.target.value,
-                              )
-                            }
-                          />
-                          <Input
-                            label="End"
-                            name={`${preset.label}-endTime`}
-                            type="time"
-                            value={times.endTime}
-                            error={
-                              presetTimeErrors[`${preset.label}-endTime`] ||
-                              undefined
-                            }
-                            onChange={(event) =>
-                              updatePresetTime(
-                                preset.label,
-                                "endTime",
-                                event.target.value,
-                              )
-                            }
-                          />
-                        </div>
-                      ) : null}
-                    </div>
+                      {day.label}
+                    </button>
                   );
                 })}
               </div>
             </div>
-            {selectedPresets.length === 0 && !severalDays ? (
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <Input
-                  label="Start"
-                  name="startTime"
-                  type="time"
-                  value={form.startTime}
-                  error={touched.startTime ? errors.startTime : undefined}
-                  onChange={(event) => updateField("startTime", event.target.value)}
-                  onBlur={() =>
-                    setTouched((current) => ({ ...current, startTime: true }))
-                  }
-                />
-                <Input
-                  label="End"
-                  name="endTime"
-                  type="time"
-                  value={form.endTime}
-                  error={touched.endTime ? errors.endTime : undefined}
-                  onChange={(event) => updateField("endTime", event.target.value)}
-                  onBlur={() =>
-                    setTouched((current) => ({ ...current, endTime: true }))
-                  }
-                />
+            <div className="flex flex-col gap-1.5">
+              <p className="text-xs font-medium text-zinc-400">Shifts</p>
+              <div className="flex flex-col gap-2">
+                {presets.map((preset) => {
+                  const selected = selectedPresets.includes(preset.label);
+                  const times = presetTimes[preset.label] ?? preset;
+                  const timeError =
+                    presetTimeErrors[`${preset.label}-startTime`] ||
+                    presetTimeErrors[`${preset.label}-endTime`];
+                  return (
+                    <button
+                      key={preset.label}
+                      type="button"
+                      onClick={() => togglePreset(preset.label)}
+                      className={cn(
+                        "rounded-md border px-3 py-2 text-left text-sm",
+                        selected
+                          ? "border-zinc-500 bg-zinc-900 text-foreground"
+                          : "border-border text-zinc-400",
+                      )}
+                    >
+                      <span className="block font-medium">{preset.label}</span>
+                      <span className="mt-0.5 block text-xs text-zinc-500">
+                        {times.startTime} – {times.endTime}
+                      </span>
+                      {timeError ? (
+                        <span className="mt-1 block text-xs text-red-400">
+                          {timeError}
+                        </span>
+                      ) : null}
+                    </button>
+                  );
+                })}
               </div>
-            ) : null}
+            </div>
           </>
         )}
 
@@ -645,40 +496,41 @@ export function CreateShiftForm({
           min={1}
           max={50}
           value={form.slots}
+          hint={editing ? undefined : "Spots on every shift you open."}
           error={touched.slots ? errors.slots : undefined}
           onChange={(event) => updateField("slots", event.target.value)}
           onBlur={() => setTouched((current) => ({ ...current, slots: true }))}
         />
 
-        {editing || (!severalDays && selectedPresets.length === 0) ? (
-          <Input
-            label="Name (optional)"
-            name="label"
-            value={form.label}
-            onChange={(event) => updateField("label", event.target.value)}
-            placeholder="e.g. Morning"
-          />
+        {editing ? (
+          <>
+            <Input
+              label="Name (optional)"
+              name="label"
+              value={form.label}
+              onChange={(event) => updateField("label", event.target.value)}
+              placeholder="e.g. Morning"
+            />
+            <Input
+              label="Roles"
+              name="roles"
+              value={form.roles}
+              placeholder="Write the jobs for this shift"
+              hint="Use your own names, separated by commas."
+              error={touched.roles ? errors.roles : undefined}
+              onChange={(event) => updateField("roles", event.target.value)}
+              onBlur={() => setTouched((current) => ({ ...current, roles: true }))}
+            />
+            <Input
+              label="Note (optional)"
+              name="note"
+              value={form.note}
+              error={touched.note ? errors.note : undefined}
+              onChange={(event) => updateField("note", event.target.value)}
+              onBlur={() => setTouched((current) => ({ ...current, note: true }))}
+            />
+          </>
         ) : null}
-
-        <Input
-          label="Roles"
-          name="roles"
-          value={form.roles}
-          placeholder="Write the jobs for this shift"
-          hint="Use your own names, separated by commas."
-          error={touched.roles ? errors.roles : undefined}
-          onChange={(event) => updateField("roles", event.target.value)}
-          onBlur={() => setTouched((current) => ({ ...current, roles: true }))}
-        />
-
-        <Input
-          label="Note (optional)"
-          name="note"
-          value={form.note}
-          error={touched.note ? errors.note : undefined}
-          onChange={(event) => updateField("note", event.target.value)}
-          onBlur={() => setTouched((current) => ({ ...current, note: true }))}
-        />
 
         {notice ? (
           <p

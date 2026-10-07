@@ -2,16 +2,14 @@
 
 import { useMemo, useState } from "react";
 import { CreateShiftForm } from "@/components/admin/create-shift-form";
-import { PageHeader } from "@/components/layout/page-header";
-import { ProcessNote } from "@/components/layout/process-note";
-import { ShiftCard, SpotsBadge } from "@/components/shifts/shift-card";
 import { ShiftCardList } from "@/components/shifts/shift-card-list";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { CopyButton } from "@/components/ui/copy-button";
+import { useCompany } from "@/hooks/use-company";
 import { useInitialLoading } from "@/hooks/use-initial-loading";
 import { useSchedule } from "@/hooks/use-schedule";
-import { shiftRosterText } from "@/lib/copy-text";
+import { formatJoinCode } from "@/lib/company/join-code";
 import { groupByDay } from "@/lib/group-by-day";
 import { getEmployeeName } from "@/lib/services";
 import {
@@ -25,10 +23,12 @@ import {
   remainingSlots,
   signupsForShift,
 } from "@/lib/shift-utils";
+import { formatTimeRange } from "@/lib/utils";
 import type { Shift } from "@/types";
 
 export function AdminShiftsPanel() {
   const loading = useInitialLoading();
+  const company = useCompany();
   const { shifts, signups } = useSchedule();
   const [createOpen, setCreateOpen] = useState(false);
   const [editingShift, setEditingShift] = useState<Shift | null>(null);
@@ -38,145 +38,126 @@ export function AdminShiftsPanel() {
     [shifts],
   );
   const grouped = groupByDay(upcoming);
+  const joinCode = company?.joinCode ? formatJoinCode(company.joinCode) : "";
 
-  function handleCreate(inputs: CreateShiftInput[]) {
-    createShifts(inputs);
+  function openCreate() {
+    setEditingShift(null);
+    setCreateOpen(true);
   }
 
   return (
     <div>
-      <PageHeader
-        title="Shifts"
-        description="Create and edit shifts, see who chose them, copy the list for Facebook."
-        actions={
-          <Button
-            size="sm"
-            className="w-full sm:w-auto"
-            onClick={() => {
-              setEditingShift(null);
-              setCreateOpen(true);
-            }}
-          >
-            Create shifts
-          </Button>
-        }
-      />
-
-      <div className="mb-4">
-        <ProcessNote>
-          If someone does not show up, continue your usual no-show process.
-        </ProcessNote>
+      <div className="mb-6 flex flex-col gap-3 sm:mb-8 sm:flex-row sm:items-end sm:justify-between">
+        <div className="min-w-0">
+          <h2 className="text-xl font-medium tracking-tight text-foreground">
+            {company?.companyName ?? "Shifts"}
+          </h2>
+          <p className="mt-1 text-sm text-zinc-400">
+            Who is working, and when.
+          </p>
+          {joinCode ? (
+            <p className="mt-2 flex flex-wrap items-center gap-2 text-sm text-zinc-500">
+              Team code{" "}
+              <span className="font-mono tracking-[0.14em] text-foreground">
+                {joinCode}
+              </span>
+              <CopyButton text={joinCode} label="Copy" variant="ghost" />
+            </p>
+          ) : null}
+        </div>
+        <Button size="sm" className="w-full sm:w-auto" onClick={openCreate}>
+          Create shifts
+        </Button>
       </div>
 
       <ShiftCardList
         loading={loading}
         empty={upcoming.length === 0}
-        emptyTitle="No upcoming shifts"
-        emptyDescription="Create a shift so employees can choose it."
+        emptyTitle="No shifts this week"
+        emptyDescription="Create shifts, then people can choose them."
         emptyAction={
-          <Button size="sm" onClick={() => {
-            setEditingShift(null);
-            setCreateOpen(true);
-          }}>
+          <Button size="sm" onClick={openCreate}>
             Create shifts
           </Button>
         }
       >
         {grouped.map((group) => (
-          <div key={group.label} className="grid gap-2">
+          <section key={group.label} className="grid gap-2">
             <h3 className="text-xs font-medium tracking-wide text-zinc-500">
               {group.label}
             </h3>
             {group.items.map((shift) => {
               const people = signupsForShift(signups, shift.id);
               const remaining = remainingSlots(shift, signups);
-              const unconfirmed = people.filter(
-                (signup) => signup.status !== "CONFIRMED",
-              );
 
               return (
-                <ShiftCard
+                <article
                   key={shift.id}
-                  date={shift.date}
-                  startTime={shift.startTime}
-                  endTime={shift.endTime}
-                  label={shift.label}
-                  note={shift.note}
-                  badges={
-                    <>
-                      <SpotsBadge remaining={remaining} slots={shift.slots} />
-                      {unconfirmed.length > 0 ? (
-                        <Badge variant="pending">
-                          {unconfirmed.length} not confirmed
-                        </Badge>
-                      ) : people.length > 0 ? (
-                        <Badge variant="confirmed">All confirmed</Badge>
-                      ) : null}
-                    </>
-                  }
-                  meta={
-                    people.length === 0 ? (
-                      <>
-                        {shift.positions?.length
-                          ? `${shift.positions.join(", ")} · `
-                          : ""}
-                        Nobody has chosen this yet
-                      </>
-                    ) : (
-                      <ul className="mt-1 space-y-1">
-                        {people.map((signup) => (
-                          <li
-                            key={signup.id}
-                            className="flex items-center gap-2"
-                          >
-                            <span>{getEmployeeName(signup.employeeId)}</span>
-                            <Badge
-                              variant={
-                                signup.status === "CONFIRMED"
-                                  ? "confirmed"
-                                  : "pending"
-                              }
+                  className="rounded-md border border-border bg-surface px-4 py-3.5"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-foreground">
+                        {shift.label ?? "Shift"} ·{" "}
+                        {formatTimeRange(shift.startTime, shift.endTime)}
+                      </p>
+                      {people.length === 0 ? (
+                        <p className="mt-1 text-xs text-zinc-500">Nobody yet</p>
+                      ) : (
+                        <ul className="mt-2 space-y-1">
+                          {people.map((signup) => (
+                            <li
+                              key={signup.id}
+                              className="flex items-center gap-2 text-xs text-zinc-300"
                             >
-                              {signup.status === "CONFIRMED"
-                                ? "Confirmed"
-                                : "Not confirmed"}
-                            </Badge>
-                          </li>
-                        ))}
-                      </ul>
-                    )
-                  }
-                  actions={
-                    <>
+                              <span>{getEmployeeName(signup.employeeId)}</span>
+                              <Badge
+                                variant={
+                                  signup.status === "CONFIRMED"
+                                    ? "confirmed"
+                                    : "pending"
+                                }
+                              >
+                                {signup.status === "CONFIRMED"
+                                  ? "Confirmed"
+                                  : "Not confirmed"}
+                              </Badge>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                    <Badge variant={remaining <= 0 ? "cancelled" : "default"}>
+                      {remaining <= 0
+                        ? "Full"
+                        : `${remaining} ${remaining === 1 ? "spot" : "spots"} left`}
+                    </Badge>
+                  </div>
+                  <div className="mt-3 flex gap-2">
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => {
+                        setCreateOpen(false);
+                        setEditingShift(shift);
+                      }}
+                    >
+                      Edit
+                    </Button>
+                    {people.length === 0 ? (
                       <Button
                         size="sm"
-                        variant="secondary"
-                        onClick={() => {
-                          setCreateOpen(false);
-                          setEditingShift(shift);
-                        }}
+                        variant="ghost"
+                        onClick={() => removeShift(shift.id)}
                       >
-                        Edit
+                        Remove
                       </Button>
-                      <CopyButton
-                        text={shiftRosterText(shift, signups)}
-                        label="Copy for Facebook"
-                      />
-                      {people.length === 0 ? (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => removeShift(shift.id)}
-                        >
-                          Remove
-                        </Button>
-                      ) : null}
-                    </>
-                  }
-                />
+                    ) : null}
+                  </div>
+                </article>
               );
             })}
-          </div>
+          </section>
         ))}
       </ShiftCardList>
 
@@ -187,7 +168,7 @@ export function AdminShiftsPanel() {
           setCreateOpen(false);
           setEditingShift(null);
         }}
-        onCreate={handleCreate}
+        onCreate={(inputs: CreateShiftInput[]) => createShifts(inputs)}
         onUpdate={(shiftId, input) => updateShift(shiftId, input)}
       />
     </div>

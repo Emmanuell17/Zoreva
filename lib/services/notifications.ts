@@ -23,7 +23,7 @@ function rebuild(state: ScheduleSnapshot = getScheduleSnapshot()) {
   notificationsSnapshot = buildReminders(getCurrentEmployeeId(), state);
 }
 
-function emit() {
+function emit() { //signals the app to rebuild the notifications
   extraListeners.forEach((listener) => listener());
 }
 
@@ -39,7 +39,7 @@ subscribeCompany(() => {
 
 rebuild();
 
-export function subscribeNotifications(listener: () => void) {
+export function subscribeNotifications(listener: () => void) { 
   extraListeners.add(listener);
   return () => {
     extraListeners.delete(listener);

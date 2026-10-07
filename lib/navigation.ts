@@ -11,8 +11,7 @@ export const employeeNav: NavItem[] = [
 ];
 
 export const adminNav: NavItem[] = [
-  { href: "/admin", label: "Home" },
-  { href: "/admin/shifts", label: "Shifts" },
+  { href: "/admin", label: "Shifts" },
   { href: "/admin/hours", label: "Hours" },
   { href: "/admin/history", label: "History" },
 ];

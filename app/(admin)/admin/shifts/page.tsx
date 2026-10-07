@@ -1,5 +1,5 @@
-import { AdminShiftsPanel } from "@/components/admin/admin-shifts-panel";
+import { redirect } from "next/navigation";
 
 export default function AdminShiftsPage() {
-  return <AdminShiftsPanel />;
+  redirect("/admin");
 }
