@@ -187,13 +187,6 @@ export async function persistMembership(membership: CompanyMembership) {
   return membership;
 }
 
-export function clearMembership(userId: string | null | undefined) {
-  if (!userId) return;
-  const memberships = getMembershipMap();
-  delete memberships[userId];
-  writeJson(MEMBERSHIPS_KEY, memberships);
-}
-
 export function uniqueJoinCode(existing?: string): string {
   if (existing && normalizeJoinCode(existing)) return normalizeJoinCode(existing);
 
@@ -234,8 +227,4 @@ export async function persistCompany(company: Company) {
     // Local workspace still works on this device.
   }
   return next;
-}
-
-export function loadCompanyForOwner(ownerId: string | null | undefined): Company | null {
-  return findLocalCompanyForManager({ ownerId });
 }

@@ -12,8 +12,6 @@ export type ShiftPreset = {
   slots: number;
 };
 
-export const shiftPresets = defaultShiftPresets;
-
 export function getShiftPresets(): ShiftPreset[] {
   const company = getActiveCompany();
   if (company && company.shiftTemplates.length > 0) {

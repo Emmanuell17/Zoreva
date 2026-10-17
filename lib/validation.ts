@@ -73,16 +73,6 @@ export function validateOptionalNote(
   return undefined;
 }
 
-export function validateOptionalMessage(
-  value: string,
-  maxLength = 200,
-): string | undefined {
-  if (value.trim().length > maxLength) {
-    return `Message must be ${maxLength} characters or fewer.`;
-  }
-  return undefined;
-}
-
 export function validateSlots(value: string): string | undefined {
   const required = validateRequired(value, "How many people");
   if (required) return required;
