@@ -101,7 +101,8 @@ This is a portfolio product, not a production multi-tenant SaaS. It is written s
 | `/setup` | Manager | First-run company workspace |
 | `/join` · `/join/[code]` | Employee | Join a company with a manager’s code |
 | `/employee/*` | Employee | Home, choose, schedule, hours, reminders |
-| `/admin/*` | Manager | Home, shifts, hours, history |
+| `/admin/*` | Manager | Shifts, hours, history, advisor |
+| `/api/advisor/*` | Server | Operations Advisor jobs (InfiniSynapse, key stays on the server) |
 
 Auth is Firebase. Role is stored locally after sign-in so the client can route to the right shell. Company setup creates a workspace keyed to the manager’s owner id. Employees join with a code. Schedule changes write back into that workspace in Firestore (and a local cache).
 
@@ -127,10 +128,14 @@ Without Firebase env vars the UI still loads, which keeps local browsing and UI 
 
 ```text
 app/                 Route groups: landing, auth, setup, join, employee, admin
-components/          Feature UI (auth, admin, employee, setup, join, shifts, layout)
+app/api/advisor/     Advisor endpoints (analyze, status, cancel, health)
+components/          Feature UI (landing, auth, admin, employee, setup, join, shifts, layout)
 hooks/               Schedule and company subscriptions
 lib/company/         Workspace build, Firestore + local persistence, join codes
 lib/services/        Schedule commands and queries
+lib/advisor/         In-memory advisor job store
+lib/infinisynapse/   Server-only InfiniSynapse adapter
+lib/workforce/       Workforce file parsing and local checks
 lib/firebase/        Auth + Firestore client config
 lib/validation.ts    Shared form rules
 types/               Domain types (Shift, Signup, Hours, Company)
@@ -161,7 +166,13 @@ Open [http://localhost:3000](http://localhost:3000).
 6. Restart `npm run dev`.
 7. On **Register**, pick Employee or Admin, then **Continue with Google**.
 
+### InfiniSynapse (Operations Advisor)
+
+The API key is **server-only**. Put it in `.env.local` as `INFINISYNAPSE_API_KEY` (never `NEXT_PUBLIC_…`). Full setup, production env vars, and a manual test are in [docs/INFINISYNAPSE.md](docs/INFINISYNAPSE.md).
+
 ```bash
+npm run test:advisor
+npm run test:infinisynapse
 npm run lint
 npm run build
 npm run start
@@ -177,12 +188,13 @@ npm run start
 - Manager setup, shift CRUD, confirmation overview, submitted hours
 - Firebase Google authentication
 - Firestore workspaces shared between a manager and their team
+- InfiniSynapse operations advisor for uploaded workforce CSV/Excel (advisory only)
 - In-app reminders derived from live shift state
 
 **Intentionally not in this MVP**
 
 - Email/password auth
-- Server-side REST API
+- A server-side API for the schedule itself (only the Advisor has server routes today)
 - Server-side role and tenancy (roles are client-side today)
 - Email or push delivery
 - Payroll or chat integrations

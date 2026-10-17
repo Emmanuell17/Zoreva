@@ -14,6 +14,7 @@ export const adminNav: NavItem[] = [
   { href: "/admin", label: "Shifts" },
   { href: "/admin/hours", label: "Hours" },
   { href: "/admin/history", label: "History" },
+  { href: "/admin/advisor", label: "Advisor" },
 ];
 
 export function isNavItemActive(
