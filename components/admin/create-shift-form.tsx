@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
@@ -120,39 +120,20 @@ export function CreateShiftForm({
   const days = upcomingDays();
   const presets = getShiftPresets();
   const { signups } = useSchedule();
-  const [severalDays, setSeveralDays] = useState(true);
+  const [severalDays, setSeveralDays] = useState(!editing);
   const [selectedDays, setSelectedDays] = useState<string[]>(() =>
     upcomingDays().map((day) => day.value),
   );
   const [selectedPresets, setSelectedPresets] = useState<string[]>([]);
   const [presetTimes, setPresetTimes] = useState<PresetTimes>(timesFromPresets);
   const [presetTimeErrors, setPresetTimeErrors] = useState<Record<string, string>>({});
-  const [form, setForm] = useState<FormState>(getDefaultFormState);
+  const [form, setForm] = useState<FormState>(() =>
+    shift ? formStateFromShift(shift) : getDefaultFormState(),
+  );
   const [errors, setErrors] = useState<FieldErrors<CreateShiftFields>>({});
   const [touched, setTouched] = useState<Partial<Record<CreateShiftFields, boolean>>>({});
   const [submitting, setSubmitting] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    if (shift) {
-      setForm(formStateFromShift(shift));
-      setSeveralDays(false);
-      setSelectedPresets([]);
-    } else {
-      setForm(getDefaultFormState());
-      setSeveralDays(true);
-      setSelectedDays(days.map((day) => day.value));
-      setSelectedPresets([]);
-      setPresetTimes(timesFromPresets());
-    }
-    setPresetTimeErrors({});
-    setErrors({});
-    setTouched({});
-    setSubmitting(false);
-    setNotice(null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- reset when the modal opens
-  }, [open, shift]);
 
   function updateField<K extends keyof FormState>(key: K, value: FormState[K]) {
     const nextForm = { ...form, [key]: value };

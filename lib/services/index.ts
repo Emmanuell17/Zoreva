@@ -1,10 +1,4 @@
-export {
-  CURRENT_EMPLOYEE_ID,
-  getCurrentEmployeeId,
-  getEmployeeName,
-  getEmployees,
-  getUsers,
-} from "@/lib/services/employees";
+export { getEmployeeName } from "@/lib/services/employees";
 export {
   getNotifications,
   markAllNotificationsRead,
@@ -13,7 +7,6 @@ export {
 } from "@/lib/services/notifications";
 export {
   confirmShift,
-  createShift,
   createShifts,
   getScheduleSnapshot,
   getShiftById,
@@ -23,5 +16,4 @@ export {
   submitHours,
   subscribeSchedule,
   updateShift,
-  keepOnlySelectedShiftsOnDays,
 } from "@/lib/services/schedule";

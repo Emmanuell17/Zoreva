@@ -256,16 +256,6 @@ export function hasJoinedCompany(userId: string | null | undefined): boolean {
   return readJoinedCompany(userId);
 }
 
-export function createCompanyWorkspace(
-  ownerId: string,
-  input: CompanySetupInput,
-): Company {
-  const company = buildCompanyWorkspace(ownerId, input);
-  const saved = saveCompany(company);
-  activateCompany(saved);
-  return saved;
-}
-
 export async function persistNewCompanyWorkspace(
   ownerId: string,
   input: CompanySetupInput,
@@ -274,28 +264,6 @@ export async function persistNewCompanyWorkspace(
   const saved = await persistCompany(company);
   activateCompany(saved);
   return saved;
-}
-
-export function updateShiftTemplateTimes(
-  updates: Array<{ name: string; startTime: string; endTime: string }>,
-) {
-  if (!activeCompany || updates.length === 0) return;
-
-  const byName = new Map(updates.map((item) => [item.name, item]));
-  activeCompany = {
-    ...activeCompany,
-    shiftTemplates: activeCompany.shiftTemplates.map((template) => {
-      const next = byName.get(template.name);
-      if (!next) return template;
-      return {
-        ...template,
-        startTime: next.startTime,
-        endTime: next.endTime,
-      };
-    }),
-  };
-  saveCompany(activeCompany);
-  notify();
 }
 
 export function ownerIdFromAuth(options: {

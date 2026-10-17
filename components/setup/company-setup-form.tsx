@@ -1,11 +1,10 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useAuth } from "@/components/auth/auth-provider";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import "@/lib/services/schedule";
 import { templateDefaults } from "@/lib/company/defaults";
 import { ownerIdFromAuth, persistNewCompanyWorkspace } from "@/lib/company/store";
 import {
@@ -73,14 +72,8 @@ export function CompanySetupForm() {
   }));
   const [errors, setErrors] = useState<FieldErrors>({} as FieldErrors);
   const [touched, setTouched] = useState<Record<string, boolean>>({});
-
-  useEffect(() => {
-    setForm((current) => ({
-      ...current,
-      managerName: current.managerName || user?.displayName || "",
-      email: current.email || user?.email || "",
-    }));
-  }, [user]);
+  const managerName = form.managerName || user?.displayName || "";
+  const email = form.email || user?.email || "";
 
   function setField<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((current) => ({ ...current, [key]: value }));
@@ -99,8 +92,8 @@ export function CompanySetupForm() {
     if (index === 0) {
       return {
         companyName: validateRequired(form.companyName, "Company name"),
-        managerName: validateRequired(form.managerName, "Manager name"),
-        email: validateEmail(form.email),
+        managerName: validateRequired(managerName, "Manager name"),
+        email: validateEmail(email),
       };
     }
 
@@ -160,8 +153,8 @@ export function CompanySetupForm() {
     try {
       await persistNewCompanyWorkspace(ownerId, {
         companyName: form.companyName,
-        managerName: form.managerName,
-        email: user?.email || form.email,
+        managerName,
+        email: user?.email || email,
         employeeCount: Number(form.employeeCount),
         shiftTemplates: form.shifts.map((shift) => ({
           name: shift.name,
@@ -234,7 +227,7 @@ export function CompanySetupForm() {
             <Input
               label="Manager name"
               name="managerName"
-              value={form.managerName}
+              value={managerName}
               placeholder="Your name"
               error={touched.managerName ? errors.managerName : undefined}
               onChange={(event) => setField("managerName", event.target.value)}
@@ -243,7 +236,7 @@ export function CompanySetupForm() {
               label="Email address"
               name="email"
               type="email"
-              value={form.email}
+              value={email}
               placeholder="you@company.com"
               error={touched.email ? errors.email : undefined}
               onChange={(event) => setField("email", event.target.value)}

@@ -4,12 +4,10 @@ import { shiftsSeed } from "@/lib/mocks/shifts";
 import { signupsSeed } from "@/lib/mocks/signups";
 import { getCurrentEmployeeId } from "@/lib/company/store";
 import {
-  calendarDayKey,
   employeeHasOverlap,
   hoursForSignup,
   isPastShift,
   isSameShiftSlot,
-  isUpcomingShift,
   remainingSlots,
   signupsForShift,
   sortShifts,
@@ -91,23 +89,6 @@ export function getShiftById(
   return state.shifts.find((shift) => shift.id === shiftId);
 }
 
-export function getUpcomingShifts(
-  state: ScheduleSnapshot = snapshot,
-): Shift[] {
-  return state.shifts.filter((shift) => isUpcomingShift(shift));
-}
-
-export function getPastShifts(state: ScheduleSnapshot = snapshot): Shift[] {
-  return sortShifts(state.shifts.filter((shift) => isPastShift(shift))).reverse();
-}
-
-export function getEmployeeSignups(
-  employeeId: string = getCurrentEmployeeId(),
-  state: ScheduleSnapshot = snapshot,
-): ShiftSignup[] {
-  return state.signups.filter((signup) => signup.employeeId === employeeId);
-}
-
 export function getSignupForShift(
   shiftId: string,
   employeeId: string = getCurrentEmployeeId(),
@@ -116,10 +97,6 @@ export function getSignupForShift(
   return state.signups.find(
     (signup) => signup.shiftId === shiftId && signup.employeeId === employeeId,
   );
-}
-
-export function createShift(input: CreateShiftInput): Shift | undefined {
-  return createShifts([input])[0];
 }
 
 export function createShifts(inputs: CreateShiftInput[]): Shift[] {
@@ -149,33 +126,6 @@ export function createShifts(inputs: CreateShiftInput[]): Shift[] {
   shifts = [...shifts, ...created];
   notify();
   return created;
-}
-
-function timeKey(value: string) {
-  return value.slice(0, 5);
-}
-
-function slotKey(item: { date: string | Date; startTime: string; endTime: string }) {
-  return `${calendarDayKey(item.date)}|${timeKey(item.startTime)}|${timeKey(item.endTime)}`;
-}
-
-export function keepOnlySelectedShiftsOnDays(
-  dates: Array<string | Date>,
-  keep: CreateShiftInput[],
-): number {
-  const dateKeys = new Set(dates.map((date) => calendarDayKey(date)));
-  const keepSlots = new Set(keep.map(slotKey));
-  const next = shifts.filter((shift) => {
-    const day = calendarDayKey(shift.date);
-    if (!dateKeys.has(day)) return true;
-    if (signupsForShift(signups, shift.id).length > 0) return true;
-    return keepSlots.has(slotKey(shift));
-  });
-  const removed = shifts.length - next.length;
-  if (removed === 0) return 0;
-  shifts = next;
-  notify();
-  return removed;
 }
 
 export function updateShift(

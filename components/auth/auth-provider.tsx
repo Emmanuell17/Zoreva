@@ -2,6 +2,7 @@
 
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useLayoutEffect,
@@ -66,37 +67,43 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [redirectError, setRedirectError] = useState<string | null>(null);
   const syncGen = useRef(0);
 
-  function syncLocalWorkspace(
-    nextRole: Role | null,
-    uid?: string | null,
-    email?: string | null,
-  ) {
-    const ownerId = ownerIdFromAuth({ uid, configured });
-    if (nextRole === "ADMIN" && ownerId) {
-      activateWorkspaceForOwner(ownerId, email);
-      return;
-    }
-    if (nextRole === "EMPLOYEE" && uid) {
-      activateWorkspaceForMember(uid);
-      return;
-    }
-    if (!configured && ownerId && nextRole !== "EMPLOYEE") {
-      const activated = activateWorkspaceForOwner(ownerId);
-      if (activated) return;
-    }
-    activateDemoWorkspace();
-  }
+  const syncLocalWorkspace = useCallback(
+    (
+      nextRole: Role | null,
+      uid?: string | null,
+      email?: string | null,
+    ) => {
+      const ownerId = ownerIdFromAuth({ uid, configured });
+      if (nextRole === "ADMIN" && ownerId) {
+        activateWorkspaceForOwner(ownerId, email);
+        return;
+      }
+      if (nextRole === "EMPLOYEE" && uid) {
+        activateWorkspaceForMember(uid);
+        return;
+      }
+      if (!configured && ownerId && nextRole !== "EMPLOYEE") {
+        const activated = activateWorkspaceForOwner(ownerId);
+        if (activated) return;
+      }
+      activateDemoWorkspace();
+    },
+    [configured],
+  );
 
-  async function syncWorkspace(
-    nextRole: Role | null,
-    uid?: string | null,
-    email?: string | null,
-  ) {
-    const gen = ++syncGen.current;
-    syncLocalWorkspace(nextRole, uid, email);
-    await hydrateWorkspace({ role: nextRole, uid, email, configured });
-    return gen === syncGen.current;
-  }
+  const syncWorkspace = useCallback(
+    async (
+      nextRole: Role | null,
+      uid?: string | null,
+      email?: string | null,
+    ) => {
+      const gen = ++syncGen.current;
+      syncLocalWorkspace(nextRole, uid, email);
+      await hydrateWorkspace({ role: nextRole, uid, email, configured });
+      return gen === syncGen.current;
+    },
+    [configured, syncLocalWorkspace],
+  );
 
   useLayoutEffect(() => {
     const stored = getStoredRole();
@@ -107,7 +114,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     syncLocalWorkspace(stored ?? role, user?.uid, user?.email);
     // First paint should already have the right company loaded.
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only on mount / configured
-  }, [configured]);
+  }, [configured, syncLocalWorkspace]);
 
   useEffect(() => {
     if (!configured) return;
@@ -169,7 +176,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       cancelled = true;
       unsubscribe();
     };
-  }, [configured]);
+  }, [configured, syncWorkspace]);
 
   const value = useMemo<AuthContextValue>(
     () => ({
@@ -214,7 +221,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setRedirectError(null);
       },
     }),
-    [user, role, loading, configured, ready, redirectError],
+    [user, role, loading, configured, ready, redirectError, syncWorkspace],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

@@ -53,12 +53,15 @@ export function JoinCompanyForm({ initialCode = "" }: JoinCompanyFormProps) {
     redirectError,
     clearRedirectError,
   } = useAuth();
-  const [code, setCode] = useState(() => formatJoinCode(initialCode));
+  const [code, setCode] = useState(() =>
+    formatJoinCode(initialCode || peekPendingJoinCode()),
+  );
   const [error, setError] = useState<string | null>(null);
   const [joining, setJoining] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const attemptedCode = useRef<string | null>(null);
   const autoSignInStarted = useRef(false);
+  const startGoogleJoinRef = useRef<() => Promise<void>>(async () => {});
 
   const signedIn = Boolean(configured && user);
   const isManager = role === "ADMIN";
@@ -98,14 +101,6 @@ export function JoinCompanyForm({ initialCode = "" }: JoinCompanyFormProps) {
 
     return joinTask;
   }
-
-  useEffect(() => {
-    const pending = peekPendingJoinCode();
-    if (!pending) return;
-    setCode((current) =>
-      normalizeJoinCode(current) ? current : formatJoinCode(pending),
-    );
-  }, []);
 
   useEffect(() => {
     if (!ready || loading || !user || role === "ADMIN") return;
@@ -167,8 +162,9 @@ export function JoinCompanyForm({ initialCode = "" }: JoinCompanyFormProps) {
     }
   }
 
-  const startGoogleJoinRef = useRef(handleGoogleSignIn);
-  startGoogleJoinRef.current = handleGoogleSignIn;
+  useEffect(() => {
+    startGoogleJoinRef.current = handleGoogleSignIn;
+  });
 
   useEffect(() => {
     if (autoSignInStarted.current || !ready || loading || user) return;

@@ -27,13 +27,6 @@ export function joinPathForCode(value: string): string {
   return `/join/${normalizeJoinCode(value)}`;
 }
 
-export function inviteUrlForCode(value: string, origin?: string): string {
-  const path = joinPathForCode(value);
-  if (origin) return `${origin.replace(/\/$/, "")}${path}`;
-  if (typeof window !== "undefined") return `${window.location.origin}${path}`;
-  return path;
-}
-
 export function isJoinPath(path: string | null | undefined): boolean {
   if (!path) return false;
   return path === "/join" || path.startsWith("/join/");

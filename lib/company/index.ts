@@ -4,36 +4,19 @@ import { isJoinPath, joinCodeFromPath } from "@/lib/company/join-code";
 import { homePathForRole, isAppPath } from "@/lib/firebase/auth";
 import type { Role } from "@/types";
 
-export { SETUP_PATH, JOIN_PATH, LOCAL_OWNER_ID, defaultShiftTemplates, templateDefaults } from "@/lib/company/defaults";
+export { SETUP_PATH, JOIN_PATH } from "@/lib/company/defaults";
 export { hasCompletedSetup, hasJoinedCompany } from "@/lib/company/persistence";
 export {
   clearPendingJoinCode,
   formatJoinCode,
-  inviteUrlForCode,
-  isJoinPath,
-  joinCodeFromPath,
   joinPathForCode,
   normalizeJoinCode,
   peekPendingJoinCode,
   storePendingJoinCode,
 } from "@/lib/company/join-code";
 export {
-  activateDemoWorkspace,
-  activateWorkspaceForMember,
-  activateWorkspaceForOwner,
-  createCompanyWorkspace,
-  getActiveCompany,
-  getActiveEmployees,
-  getCurrentEmployeeId,
-  hasJoinedCompany as hasJoinedActiveCompany,
-  hydrateWorkspace,
   joinCompanyWithCode,
   ownerIdFromAuth,
-  persistActiveSchedule,
-  persistNewCompanyWorkspace,
-  registerScheduleBridge,
-  subscribeCompany,
-  updateShiftTemplateTimes,
 } from "@/lib/company/store";
 
 export function resolveAppPath(
@@ -64,9 +47,8 @@ export function resolveAppPath(
   }
 
   if (requested && isJoinPath(requested)) {
-    return joinCodeFromPath(requested)
-      ? `/join/${joinCodeFromPath(requested)}`
-      : JOIN_PATH;
+    const code = joinCodeFromPath(requested);
+    return code ? `/join/${code}` : JOIN_PATH;
   }
 
   return homePathForRole(role);

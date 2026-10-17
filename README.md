@@ -65,10 +65,10 @@ This is a portfolio product, not a production multi-tenant SaaS. It is written s
 | Product sense | Phone-first flow: choose a shift, confirm, enter hours |
 | Frontend architecture | Next.js App Router, role-based route groups, shared UI primitives |
 | Domain modeling | Shifts, signups, hours, companies, templates as typed entities |
-| State | In-memory store + `useSyncExternalStore`, persisted per company in `localStorage` |
+| State | In-memory store + `useSyncExternalStore`, synced to Firestore and cached in `localStorage` |
 | Auth | Firebase Google sign-in with popup, redirect fallback, and return-to routing |
 | UX | Dark, large-tap mobile UI; field-level validation; empty/loading states |
-| Honesty about scope | Mock persistence today, service boundary ready for a backend |
+| Honesty about scope | Client-side domain rules today; roles still live on the device |
 
 ---
 
@@ -85,11 +85,11 @@ This is a portfolio product, not a production multi-tenant SaaS. It is written s
 │  routes     │                       │  confirm, hours)     │
 └─────────────┘                       └──────────┬───────────┘
                                                  │ persist
-                                      ┌──────────▼───────────┐
-                                      │ Company workspace    │
-                                      │ localStorage         │
-                                      │ (per manager owner)  │
-                                      └──────────────────────┘
+                            ┌────────────────────▼────────────────────┐
+                            │ Company workspace                       │
+                            │ Firestore (source of truth)             │
+                            │ localStorage cache + mock seed fallback │
+                            └─────────────────────────────────────────┘
 ```
 
 **Routing**
@@ -99,10 +99,11 @@ This is a portfolio product, not a production multi-tenant SaaS. It is written s
 | `/` | Public | Product landing |
 | `/register` · `/login` | Public | Google auth + role pick |
 | `/setup` | Manager | First-run company workspace |
+| `/join` · `/join/[code]` | Employee | Join a company with a manager’s code |
 | `/employee/*` | Employee | Home, choose, schedule, hours, reminders |
 | `/admin/*` | Manager | Home, shifts, hours, history |
 
-Auth is Firebase. Role is stored locally after sign-in so the client can route to the right shell. Company setup creates a workspace keyed to the manager’s owner id; schedule changes write back into that workspace.
+Auth is Firebase. Role is stored locally after sign-in so the client can route to the right shell. Company setup creates a workspace keyed to the manager’s owner id. Employees join with a code. Schedule changes write back into that workspace in Firestore (and a local cache).
 
 Without Firebase env vars the UI still loads, which keeps local browsing and UI work unblocked.
 
@@ -117,19 +118,20 @@ Without Firebase env vars the UI still loads, which keeps local browsing and UI 
 | Language | TypeScript |
 | Styling | Tailwind CSS 4, Geist fonts, dark theme |
 | Auth | Firebase Authentication (Google) |
-| Domain data | Typed in-memory services + local workspace persistence |
+| Domain data | Typed in-memory services + Firestore workspaces |
+| Backend | Firebase Auth + Cloud Firestore |
 
 ---
 
 ## Project layout
 
 ```text
-app/                 Route groups: landing, auth, setup, employee, admin
-components/          Feature UI (auth, admin, employee, setup, shifts, layout)
+app/                 Route groups: landing, auth, setup, join, employee, admin
+components/          Feature UI (auth, admin, employee, setup, join, shifts, layout)
 hooks/               Schedule and company subscriptions
-lib/company/         Workspace build, persistence, defaults
+lib/company/         Workspace build, Firestore + local persistence, join codes
 lib/services/        Schedule commands and queries
-lib/firebase/        Auth + client config
+lib/firebase/        Auth + Firestore client config
 lib/validation.ts    Shared form rules
 types/               Domain types (Shift, Signup, Hours, Company)
 ```
@@ -171,21 +173,21 @@ npm run start
 
 **In this MVP**
 
-- Employee choose → confirm → schedule → hours
+- Employee join (code) → choose → confirm → schedule → hours
 - Manager setup, shift CRUD, confirmation overview, submitted hours
 - Firebase Google authentication
+- Firestore workspaces shared between a manager and their team
 - In-app reminders derived from live shift state
-- Per-manager workspaces in the browser
 
 **Intentionally not in this MVP**
 
 - Email/password auth
-- Server-side database or REST API
+- Server-side REST API
 - Server-side role and tenancy (roles are client-side today)
 - Email or push delivery
 - Payroll or chat integrations
 
-The next production step is a real backend behind the existing schedule service: persist companies, shifts, signups, and hours, and move role storage off the client.
+The next production step is to keep the same schedule service, then move role storage and tenancy checks off the client.
 
 ---
 

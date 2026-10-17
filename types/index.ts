@@ -67,7 +67,7 @@ export type Shift = {
   createdAt?: string | Date;
 };
 
-export type ShiftSignup = { //records who signed up for a shift
+export type ShiftSignup = {
   id: string;
   shiftId: string;
   employeeId: string;
@@ -76,7 +76,7 @@ export type ShiftSignup = { //records who signed up for a shift
   confirmedAt?: string | Date | null;
 };
 
-export type HoursEntry = { //records the hours worked for a shift
+export type HoursEntry = {
   id: string;
   shiftId: string;
   employeeId: string;
@@ -89,7 +89,7 @@ export type HoursEntry = { //records the hours worked for a shift
 
 export type ReminderKind = "CONFIRM" | "HOURS" | "SHIFT";
 
-export type AppNotification = { //notifications for the app
+export type AppNotification = {
   id: string;
   title: string;
   body: string;

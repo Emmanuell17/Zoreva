@@ -162,6 +162,7 @@ export function AdminShiftsPanel() {
       </ShiftCardList>
 
       <CreateShiftForm
+        key={editingShift?.id ?? (createOpen ? "create" : "closed")}
         open={createOpen || Boolean(editingShift)}
         shift={editingShift}
         onClose={() => {
