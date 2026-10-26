@@ -24,11 +24,29 @@ function loadEnvFile(pathname) {
 loadEnvFile(resolve(process.cwd(), ".env.local"));
 loadEnvFile(resolve(process.cwd(), ".env"));
 
-const key = process.env.INFINISYNAPSE_API_KEY?.trim();
-const base = (process.env.INFINISYNAPSE_BASE_URL || "https://app.infinisynapse.com").replace(
-  /\/$/,
-  "",
-);
+const key = process.env.INFINISYNAPSE_API_KEY
+  ?.replace(/^\uFEFF/, "")
+  .trim()
+  .replace(/^['"]+|['"]+$/g, "")
+  .replace(/^Bearer\s+/i, "")
+  .replace(/[\s\u200B\u200C\u200D\uFEFF]+/g, "");
+
+function normalizeBase(raw) {
+  const value = (raw || "https://app.infinisynapse.com")
+    .replace(/^\uFEFF/, "")
+    .trim()
+    .replace(/^['"]+|['"]+$/g, "");
+  const withScheme = /^https?:\/\//i.test(value) ? value : `https://${value}`;
+  const url = new URL(withScheme);
+  url.pathname = url.pathname.replace(/\/+$/, "").replace(/\/api$/i, "");
+  url.search = "";
+  url.hash = "";
+  if (url.hostname === "api.infinisynapse.com") url.hostname = "app.infinisynapse.com";
+  if (url.hostname === "api.infinisynapse.cn") url.hostname = "app.infinisynapse.cn";
+  return url.toString().replace(/\/$/, "");
+}
+
+const base = normalizeBase(process.env.INFINISYNAPSE_BASE_URL);
 
 if (!key) {
   console.error(

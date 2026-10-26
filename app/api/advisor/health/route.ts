@@ -3,6 +3,7 @@ import { pingInfiniSynapse } from "@/lib/infinisynapse/client";
 import {
   InfiniSynapseApiError,
   isInfiniSynapseConfigured,
+  publicErrorMessage,
 } from "@/lib/infinisynapse/config";
 
 export const dynamic = "force-dynamic";
@@ -26,13 +27,12 @@ export async function GET() {
   } catch (error) {
     const invalid =
       error instanceof InfiniSynapseApiError && error.kind === "invalid_credentials";
+    console.error("InfiniSynapse health check failed:", publicErrorMessage(error));
     return NextResponse.json(
       {
         configured: true,
         reachable: false,
-        error: invalid
-          ? "InfiniSynapse rejected the server API key."
-          : "Could not reach InfiniSynapse.",
+        error: publicErrorMessage(error),
       },
       { status: invalid ? 401 : 502 },
     );

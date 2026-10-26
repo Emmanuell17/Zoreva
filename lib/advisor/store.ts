@@ -18,6 +18,32 @@ export type AdvisorJob = AdvisorJobPublic & {
 };
 
 const jobs = new Map<string, AdvisorJob>();
+const listeners = new Map<string, Set<(job: AdvisorJob) => void>>();
+
+function publish(job: AdvisorJob) {
+  const set = listeners.get(job.id);
+  if (!set) return;
+  for (const listener of set) {
+    try {
+      listener(job);
+    } catch {
+      // A closed browser stream must not stop the analysis.
+    }
+  }
+}
+
+export function subscribeAdvisorJob(
+  id: string,
+  listener: (job: AdvisorJob) => void,
+): () => void {
+  const set = listeners.get(id) ?? new Set<(job: AdvisorJob) => void>();
+  set.add(listener);
+  listeners.set(id, set);
+  return () => {
+    set.delete(listener);
+    if (set.size === 0) listeners.delete(id);
+  };
+}
 
 export function toPublicJob(job: AdvisorJob): AdvisorJobPublic {
   return {
@@ -49,6 +75,21 @@ export function createAdvisorJob(file: AdvisorFile): AdvisorJob {
     error: null,
   };
   jobs.set(job.id, job);
+  publish(job);
+  return job;
+}
+
+export function beginAdvisorJob(
+  id: string,
+  localFindings: LocalWorkforceFindings,
+): AdvisorJob | null {
+  const job = jobs.get(id);
+  if (!job || job.status === "completed" || job.status === "failed") return job ?? null;
+  job.status = "running";
+  job.progress = "Running Zoreva checks…";
+  job.localFindings = localFindings;
+  jobs.set(id, job);
+  publish(job);
   return job;
 }
 
@@ -62,6 +103,7 @@ export function startJobRun(id: string, progress: string): AdvisorJob | null {
   job.status = "running";
   job.progress = progress;
   jobs.set(id, job);
+  publish(job);
   return job;
 }
 
@@ -75,6 +117,7 @@ export function setJobProgress(
   job.progress = progress;
   if (infiniTaskId) job.infiniTaskId = infiniTaskId;
   jobs.set(id, job);
+  publish(job);
   return job;
 }
 
@@ -98,6 +141,7 @@ export function completeJob(
   job.error = null;
   job.file = { ...job.file, bytes: new Uint8Array() };
   jobs.set(id, job);
+  publish(job);
   return job;
 }
 
@@ -118,5 +162,6 @@ export function failJob(
   if (extra?.localFindings) job.localFindings = extra.localFindings;
   job.file = { ...job.file, bytes: new Uint8Array() };
   jobs.set(id, job);
+  publish(job);
   return job;
 }

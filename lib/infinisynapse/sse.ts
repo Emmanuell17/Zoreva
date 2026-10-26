@@ -1,6 +1,9 @@
 import {
   InfiniSynapseApiError,
+  alternateInfiniSynapseBaseUrl,
+  getInfiniSynapseBaseUrl,
   infiniSynapseHeaders,
+  rememberInfiniSynapseBaseUrl,
 } from "@/lib/infinisynapse/config";
 import { infiniSynapseEventsUrl } from "@/lib/infinisynapse/client";
 
@@ -71,17 +74,52 @@ export function isErrorNotification(event: InfiniSynapseSseEvent): boolean {
   return data?.type === "error";
 }
 
+async function openInfiniSynapseEvents(connId: string, signal: AbortSignal): Promise<Response> {
+  const primary = getInfiniSynapseBaseUrl();
+  try {
+    return await fetch(infiniSynapseEventsUrl(connId, primary), {
+      method: "GET",
+      headers: infiniSynapseHeaders({ Accept: "text/event-stream" }),
+      signal,
+      cache: "no-store",
+    });
+  } catch (error) {
+    const alternate = alternateInfiniSynapseBaseUrl(primary);
+    if (!alternate || signal.aborted) {
+      throw unreachable(primary, error);
+    }
+    try {
+      const response = await fetch(infiniSynapseEventsUrl(connId, alternate), {
+        method: "GET",
+        headers: infiniSynapseHeaders({ Accept: "text/event-stream" }),
+        signal,
+        cache: "no-store",
+      });
+      rememberInfiniSynapseBaseUrl(alternate);
+      return response;
+    } catch (retryError) {
+      throw unreachable(primary, retryError);
+    }
+  }
+}
+
+function unreachable(baseUrl: string, error: unknown): InfiniSynapseApiError {
+  if (error instanceof InfiniSynapseApiError) return error;
+  if (error instanceof Error && error.name === "AbortError") {
+    return new InfiniSynapseApiError("InfiniSynapse timed out.", { kind: "timeout" });
+  }
+  return new InfiniSynapseApiError(`Could not reach InfiniSynapse at ${baseUrl}.`, {
+    kind: "http",
+    status: 0,
+  });
+}
+
 export async function consumeInfiniSynapseEvents(
   connId: string,
   onEvent: (event: InfiniSynapseSseEvent) => void | Promise<void>,
   signal: AbortSignal,
 ): Promise<void> {
-  const response = await fetch(infiniSynapseEventsUrl(connId), {
-    method: "GET",
-    headers: infiniSynapseHeaders({ Accept: "text/event-stream" }),
-    signal,
-    cache: "no-store",
-  });
+  const response = await openInfiniSynapseEvents(connId, signal);
 
   if (!response.ok || !response.body) {
     throw new InfiniSynapseApiError(

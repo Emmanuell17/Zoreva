@@ -63,12 +63,12 @@ function collectSayText(
   }
 }
 
-async function readWorkspaceAnalysis(taskId: string): Promise<{
+async function readWorkspaceAnalysis(taskId: string, signal?: AbortSignal): Promise<{
   analysis: AdvisorAnalysis | null;
   artifacts: string[];
   previewText: string;
 }> {
-  const workspace = await getTaskWorkspace(taskId);
+  const workspace = await getTaskWorkspace(taskId, signal);
   const files = (workspace?.files ?? []).filter((name) => typeof name === "string");
   const previewable = files.filter((name) =>
     /\.(md|json|txt|csv)$/i.test(name),
@@ -76,7 +76,7 @@ async function readWorkspaceAnalysis(taskId: string): Promise<{
   const chunks: string[] = [];
   for (const fileName of previewable.slice(0, 8)) {
     try {
-      const preview = await previewTaskFile(taskId, fileName);
+      const preview = await previewTaskFile(taskId, fileName, signal);
       if (typeof preview?.content === "string" && preview.content.trim()) {
         chunks.push(preview.content);
       }
@@ -92,7 +92,10 @@ async function readWorkspaceAnalysis(taskId: string): Promise<{
   };
 }
 
-export async function runWorkforceAnalysis(jobId: string): Promise<AdvisorJob> {
+export async function runWorkforceAnalysis(
+  jobId: string,
+  signal?: AbortSignal,
+): Promise<AdvisorJob> {
   const job = getAdvisorJob(jobId);
   if (!job) throw new Error("Unknown analysis job.");
 
@@ -103,6 +106,8 @@ export async function runWorkforceAnalysis(jobId: string): Promise<AdvisorJob> {
   const collected: string[] = [];
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), ANALYSIS_TIMEOUT_MS);
+  if (signal?.aborted) controller.abort();
+  else signal?.addEventListener("abort", () => controller.abort(), { once: true });
   const { markReady, ready } = waitForReady(READY_WAIT_MS, controller.signal);
 
   let completed = false;
@@ -131,14 +136,17 @@ export async function runWorkforceAnalysis(jobId: string): Promise<AdvisorJob> {
       if (isUploadAsk(message) && !uploadAsked) {
         uploadAsked = true;
         setJobProgress(jobId, "Uploading the spreadsheet to the task sandbox…", lastTaskId);
-        const uploaded = await uploadSandboxFile(lastTaskId, job.file);
-        await sendInfiniSynapseMessage({
-          type: "askResponse",
-          taskId: lastTaskId,
-          connId: job.connId,
-          askResponse: "messageResponse",
-          text: JSON.stringify(uploaded ?? { filename: job.file.filename }),
-        });
+        const uploaded = await uploadSandboxFile(lastTaskId, job.file, controller.signal);
+        await sendInfiniSynapseMessage(
+          {
+            type: "askResponse",
+            taskId: lastTaskId,
+            connId: job.connId,
+            askResponse: "messageResponse",
+            text: JSON.stringify(uploaded ?? { filename: job.file.filename }),
+          },
+          controller.signal,
+        );
       }
 
       if (isCompletionMessage(message)) {
@@ -155,26 +163,29 @@ export async function runWorkforceAnalysis(jobId: string): Promise<AdvisorJob> {
   try {
     await ready;
     setJobProgress(jobId, "Uploading source file…", lastTaskId);
-    await uploadTaskWorkspaceFile(job.infiniTaskId, job.file);
+    await uploadTaskWorkspaceFile(job.infiniTaskId, job.file, controller.signal);
 
     setJobProgress(jobId, "Starting InfiniSynapse analysis…", lastTaskId);
-    await sendInfiniSynapseMessage({
-      type: "newTask",
-      text: analysisPrompt(job.file.filename, table.rows.length),
-      connId: job.connId,
-      taskId: job.infiniTaskId,
-      chatSettings: { mode: "act" },
-      autoApprovalSettings: {
-        maxRequests: 1000,
-        maxSubAgentRequests: 500,
-        enableNotifications: true,
-        debugMode: false,
-        enableWebSearch: false,
-        enableReadImage: false,
-        enableBrowser: false,
-        enableNativeToolCalling: true,
+    await sendInfiniSynapseMessage(
+      {
+        type: "newTask",
+        text: analysisPrompt(job.file.filename, table.rows.length),
+        connId: job.connId,
+        taskId: job.infiniTaskId,
+        chatSettings: { mode: "act" },
+        autoApprovalSettings: {
+          maxRequests: 1000,
+          maxSubAgentRequests: 500,
+          enableNotifications: true,
+          debugMode: false,
+          enableWebSearch: false,
+          enableReadImage: false,
+          enableBrowser: false,
+          enableNativeToolCalling: true,
+        },
       },
-    });
+      controller.signal,
+    );
 
     await events;
 
@@ -183,7 +194,7 @@ export async function runWorkforceAnalysis(jobId: string): Promise<AdvisorJob> {
     }
 
     setJobProgress(jobId, "Reading InfiniSynapse results…", lastTaskId);
-    const workspace = await readWorkspaceAnalysis(lastTaskId);
+    const workspace = await readWorkspaceAnalysis(lastTaskId, signal);
     const analysis =
       workspace.analysis ?? parseAdvisorAnalysis(collected.join("\n\n"));
 
@@ -204,6 +215,10 @@ export async function runWorkforceAnalysis(jobId: string): Promise<AdvisorJob> {
     });
     return done!;
   } catch (error) {
+    const current = getAdvisorJob(jobId);
+    if (current && (current.status === "completed" || current.status === "failed")) {
+      return current;
+    }
     if (lastTaskId) {
       try {
         await cancelInfiniSynapseTask(lastTaskId);
@@ -211,7 +226,12 @@ export async function runWorkforceAnalysis(jobId: string): Promise<AdvisorJob> {
         // Best-effort cancel; the user-facing error is the original failure.
       }
     }
-    const failed = failJob(jobId, publicErrorMessage(error), {
+    const message = signal?.aborted
+      ? "The analysis was cancelled."
+      : controller.signal.aborted
+        ? "InfiniSynapse timed out before the analysis finished."
+        : publicErrorMessage(error);
+    const failed = failJob(jobId, message, {
       infiniTaskId: lastTaskId,
       localFindings,
     });

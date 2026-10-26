@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -33,6 +33,7 @@ export function AdminAdvisorPanel() {
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -55,19 +56,6 @@ export function AdminAdvisorPanel() {
     };
   }, []);
 
-  useEffect(() => {
-    if (!job || job.status === "completed" || job.status === "failed") return;
-    const timer = window.setInterval(() => {
-      void fetch(`/api/advisor/${job.id}`)
-        .then(async (response) => {
-          const body = (await response.json()) as { job?: AdvisorJobPublic; error?: string };
-          if (body.job) setJob(body.job);
-        })
-        .catch(() => undefined);
-    }, 2000);
-    return () => window.clearInterval(timer);
-  }, [job]);
-
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
     setError(null);
@@ -76,32 +64,65 @@ export function AdminAdvisorPanel() {
       return;
     }
 
+    abortRef.current?.abort();
+    const abort = new AbortController();
+    abortRef.current = abort;
     setSubmitting(true);
+    setJob(null);
     const form = new FormData();
     form.append("file", file);
     try {
       const response = await fetch("/api/advisor/analyze", {
         method: "POST",
         body: form,
+        signal: abort.signal,
       });
-      const body = (await response.json()) as { job?: AdvisorJobPublic; error?: string };
-      if (!response.ok || !body.job) {
-        setError(body.error ?? "Could not start the analysis.");
+      if (!response.ok) {
+        const body = (await response.json().catch(() => null)) as { error?: string } | null;
+        setError(body?.error ?? "Could not start the analysis.");
         return;
       }
-      setJob(body.job);
-    } catch {
+      if (!response.body) {
+        setError("Could not start the analysis.");
+        return;
+      }
+      await readAdvisorStream(response.body, setJob);
+      setJob((current) => {
+        if (!current || current.status === "completed" || current.status === "failed") {
+          return current;
+        }
+        return {
+          ...current,
+          status: "failed",
+          progress: "Failed",
+          error: "The analysis stopped before it finished.",
+        };
+      });
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") {
+        let hadJob = false;
+        setJob((current) => {
+          if (!current) return current;
+          hadJob = true;
+          return {
+            ...current,
+            status: "failed",
+            progress: "Failed",
+            error: current.error ?? "The analysis was cancelled.",
+          };
+        });
+        if (!hadJob) setError("The analysis was cancelled.");
+        return;
+      }
       setError("Could not start the analysis.");
     } finally {
+      if (abortRef.current === abort) abortRef.current = null;
       setSubmitting(false);
     }
   }
 
-  async function handleCancel() {
-    if (!job) return;
-    const response = await fetch(`/api/advisor/${job.id}/cancel`, { method: "POST" });
-    const body = (await response.json()) as { job?: AdvisorJobPublic };
-    if (body.job) setJob(body.job);
+  function handleCancel() {
+    abortRef.current?.abort();
   }
 
   const busy = submitting || job?.status === "queued" || job?.status === "running";
@@ -141,8 +162,8 @@ export function AdminAdvisorPanel() {
           <Button type="submit" size="sm" loading={submitting} disabled={busy}>
             Analyze with InfiniSynapse
           </Button>
-          {job && (job.status === "queued" || job.status === "running") ? (
-            <Button type="button" size="sm" variant="secondary" onClick={() => void handleCancel()}>
+          {busy ? (
+            <Button type="button" size="sm" variant="secondary" onClick={handleCancel}>
               Stop
             </Button>
           ) : null}
@@ -227,6 +248,28 @@ export function AdminAdvisorPanel() {
       )}
     </div>
   );
+}
+
+async function readAdvisorStream(
+  body: ReadableStream<Uint8Array>,
+  onJob: (job: AdvisorJobPublic) => void,
+) {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const chunks = buffer.split("\n\n");
+    buffer = chunks.pop() ?? "";
+    for (const chunk of chunks) {
+      const line = chunk.split("\n").find((item) => item.startsWith("data:"));
+      if (!line) continue;
+      onJob(JSON.parse(line.slice(5).trim()) as AdvisorJobPublic);
+    }
+  }
 }
 
 function FindingList({ title, items }: { title: string; items: string[] }) {

@@ -1,7 +1,9 @@
 import {
   InfiniSynapseApiError,
+  alternateInfiniSynapseBaseUrl,
   getInfiniSynapseBaseUrl,
   infiniSynapseHeaders,
+  rememberInfiniSynapseBaseUrl,
 } from "@/lib/infinisynapse/config";
 
 const REQUEST_TIMEOUT_MS = 100_000;
@@ -15,8 +17,14 @@ type Envelope<T> = {
   ok?: boolean;
 };
 
-function joinUrl(path: string): string {
-  return `${getInfiniSynapseBaseUrl()}${path.startsWith("/") ? path : `/${path}`}`;
+function joinUrl(path: string, baseUrl = getInfiniSynapseBaseUrl()): string {
+  return `${baseUrl}${path.startsWith("/") ? path : `/${path}`}`;
+}
+
+function networkCause(error: unknown): { code?: string; message?: string } | null {
+  if (!error || typeof error !== "object" || !("cause" in error)) return null;
+  const cause = (error as { cause?: { code?: string; message?: string } }).cause;
+  return cause && typeof cause === "object" ? cause : null;
 }
 
 function classifyCode(code: number | null, status: number): InfiniSynapseApiError["kind"] {
@@ -56,16 +64,22 @@ function readMessage(body: unknown, fallback: string): string {
   );
 }
 
-export async function infiniSynapseFetch<T>(
+function isUnreachable(error: unknown): error is InfiniSynapseApiError {
+  return error instanceof InfiniSynapseApiError && error.kind === "http" && error.status === 0;
+}
+
+async function infiniSynapseFetchAt<T>(
+  baseUrl: string,
   path: string,
-  init: RequestInit & { timeoutMs?: number } = {},
+  init: RequestInit & { timeoutMs?: number },
 ): Promise<T> {
   const { timeoutMs = REQUEST_TIMEOUT_MS, headers, body, ...rest } = init;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   if (init.signal) {
-    init.signal.addEventListener("abort", () => controller.abort(), { once: true });
+    if (init.signal.aborted) controller.abort();
+    else init.signal.addEventListener("abort", () => controller.abort(), { once: true });
   }
 
   try {
@@ -74,7 +88,7 @@ export async function infiniSynapseFetch<T>(
       extraHeaders["Content-Type"] = "application/json";
     }
 
-    const response = await fetch(joinUrl(path), {
+    const response = await fetch(joinUrl(path, baseUrl), {
       ...rest,
       headers: extraHeaders,
       body,
@@ -115,7 +129,8 @@ export async function infiniSynapseFetch<T>(
     }
 
     if (parsed && typeof parsed === "object" && "data" in parsed) {
-      return (parsed as Envelope<T>).data as T;
+      const data = (parsed as Envelope<T>).data;
+      if (data !== null && data !== undefined) return data as T;
     }
 
     return parsed as T;
@@ -126,11 +141,37 @@ export async function infiniSynapseFetch<T>(
         kind: "timeout",
       });
     }
-    throw new InfiniSynapseApiError("Could not reach InfiniSynapse.", {
+    const cause = networkCause(error);
+    const detail = cause?.code ? ` (${cause.code})` : "";
+    throw new InfiniSynapseApiError(`Could not reach InfiniSynapse at ${baseUrl}${detail}.`, {
       kind: "http",
+      status: 0,
     });
   } finally {
     clearTimeout(timer);
+  }
+}
+
+export async function infiniSynapseFetch<T>(
+  path: string,
+  init: RequestInit & { timeoutMs?: number } = {},
+): Promise<T> {
+  const primary = getInfiniSynapseBaseUrl();
+  try {
+    return await infiniSynapseFetchAt<T>(primary, path, init);
+  } catch (error) {
+    const alternate = isUnreachable(error) ? alternateInfiniSynapseBaseUrl(primary) : null;
+    if (!alternate || alternate === primary) throw error;
+    try {
+      const result = await infiniSynapseFetchAt<T>(alternate, path, init);
+      rememberInfiniSynapseBaseUrl(alternate);
+      return result;
+    } catch (retryError) {
+      if (retryError instanceof InfiniSynapseApiError && retryError.status !== 0) {
+        rememberInfiniSynapseBaseUrl(alternate);
+      }
+      throw retryError;
+    }
   }
 }
 
@@ -147,26 +188,35 @@ export async function pingInfiniSynapse(): Promise<{ ok: true }> {
   });
 }
 
-export async function sendInfiniSynapseMessage(body: Record<string, unknown>) {
+export async function sendInfiniSynapseMessage(
+  body: Record<string, unknown>,
+  signal?: AbortSignal,
+) {
   return infiniSynapseFetch<unknown>("/api/ai/message", {
     method: "POST",
     body: JSON.stringify(body),
+    signal,
   });
 }
 
-export async function getTaskWorkspace(taskId: string) {
+export async function getTaskWorkspace(taskId: string, signal?: AbortSignal) {
   return infiniSynapseFetch<{ cwd?: string; files?: string[] }>(
     `/api/ai_task/getTaskWorkspace/${encodeURIComponent(taskId)}`,
-    { method: "GET" },
+    { method: "GET", signal },
   );
 }
 
-export async function previewTaskFile(taskId: string, fileName: string) {
+export async function previewTaskFile(
+  taskId: string,
+  fileName: string,
+  signal?: AbortSignal,
+) {
   return infiniSynapseFetch<{ content?: string; fileType?: string }>(
     "/api/ai_task/previewFile",
     {
       method: "POST",
       body: JSON.stringify({ taskId, fileName }),
+      signal,
     },
   );
 }
@@ -181,6 +231,7 @@ export async function cancelInfiniSynapseTask(taskId: string) {
 export async function uploadTaskWorkspaceFile(
   taskId: string,
   file: { bytes: Uint8Array; filename: string; mimeType: string },
+  signal?: AbortSignal,
 ) {
   const form = new FormData();
   form.append(
@@ -196,13 +247,14 @@ export async function uploadTaskWorkspaceFile(
     size?: number;
   }>(
     `/api/tools/taskUpload/${encodeURIComponent(taskId)}?subdir=upload_documents&naming=original`,
-    { method: "POST", body: form, timeoutMs: 100_000 },
+    { method: "POST", body: form, timeoutMs: 100_000, signal },
   );
 }
 
 export async function uploadSandboxFile(
   taskId: string,
   file: { bytes: Uint8Array; filename: string; mimeType: string },
+  signal?: AbortSignal,
 ) {
   const form = new FormData();
   form.append(
@@ -212,10 +264,10 @@ export async function uploadSandboxFile(
   );
   return infiniSynapseFetch<unknown>(
     `/api/ai/upload?taskId=${encodeURIComponent(taskId)}`,
-    { method: "POST", body: form, timeoutMs: 100_000 },
+    { method: "POST", body: form, timeoutMs: 100_000, signal },
   );
 }
 
-export function infiniSynapseEventsUrl(connId: string): string {
-  return joinUrl(`/api/ai/events?connId=${encodeURIComponent(connId)}`);
+export function infiniSynapseEventsUrl(connId: string, baseUrl?: string): string {
+  return joinUrl(`/api/ai/events?connId=${encodeURIComponent(connId)}`, baseUrl);
 }

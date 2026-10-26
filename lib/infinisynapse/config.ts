@@ -1,13 +1,57 @@
-const DEFAULT_BASE_URL = "https://app.infinisynapse.com";
+const OVERSEAS_BASE_URL = "https://app.infinisynapse.com";
+const CHINA_BASE_URL = "https://app.infinisynapse.cn";
+
+let baseUrlOverride: string | null = null;
 
 export function getInfiniSynapseBaseUrl(): string {
-  const value = process.env.INFINISYNAPSE_BASE_URL?.trim();
-  return value ? value.replace(/\/$/, "") : DEFAULT_BASE_URL;
+  return baseUrlOverride ?? configuredInfiniSynapseBaseUrl();
+}
+
+export function configuredInfiniSynapseBaseUrl(): string {
+  return normalizeInfiniSynapseBaseUrl(process.env.INFINISYNAPSE_BASE_URL) ?? OVERSEAS_BASE_URL;
+}
+
+export function rememberInfiniSynapseBaseUrl(baseUrl: string): void {
+  baseUrlOverride = baseUrl;
+}
+
+export function alternateInfiniSynapseBaseUrl(baseUrl: string): string | null {
+  if (baseUrl === CHINA_BASE_URL) return OVERSEAS_BASE_URL;
+  if (baseUrl === OVERSEAS_BASE_URL) return CHINA_BASE_URL;
+  return null;
+}
+
+export function normalizeInfiniSynapseBaseUrl(raw: string | undefined): string | null {
+  if (!raw) return null;
+  let value = raw.replace(/^\uFEFF/, "").trim().replace(/^['"]+|['"]+$/g, "").trim();
+  if (!value) return null;
+  if (!/^https?:\/\//i.test(value)) value = `https://${value}`;
+
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return null;
+  }
+
+  url.pathname = url.pathname.replace(/\/+$/, "").replace(/\/api$/i, "");
+  url.search = "";
+  url.hash = "";
+  if (url.hostname === "api.infinisynapse.com") url.hostname = "app.infinisynapse.com";
+  if (url.hostname === "api.infinisynapse.cn") url.hostname = "app.infinisynapse.cn";
+  return url.toString().replace(/\/$/, "");
 }
 
 export function getInfiniSynapseApiKey(): string | null {
-  const value = process.env.INFINISYNAPSE_API_KEY?.trim();
-  return value ? value : null;
+  const raw = process.env.INFINISYNAPSE_API_KEY;
+  if (!raw) return null;
+  const value = raw
+    .replace(/^\uFEFF/, "")
+    .trim()
+    .replace(/^['"]+|['"]+$/g, "")
+    .replace(/^Bearer\s+/i, "")
+    .replace(/[\s\u200B\u200C\u200D\uFEFF]+/g, "");
+  return value || null;
 }
 
 export function isInfiniSynapseConfigured(): boolean {
