@@ -66,6 +66,8 @@ export async function POST(request: Request) {
         const current = getAdvisorJob(currentId);
         if (!current) return;
         try {
+          // Padding pushes the event through proxies that hold small chunks.
+          controller.enqueue(encoder.encode(`: ${" ".repeat(2048)}\n\n`));
           controller.enqueue(
             encoder.encode(`data: ${JSON.stringify(toPublicJob(current))}\n\n`),
           );
@@ -74,7 +76,6 @@ export async function POST(request: Request) {
         }
       };
       const unsubscribe = subscribeAdvisorJob(job.id, () => send(job.id));
-      send(job.id);
       try {
         beginAdvisorJob(job.id, localFindings);
         await runWorkforceAnalysis(job.id, abort.signal);

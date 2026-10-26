@@ -87,34 +87,18 @@ export function AdminAdvisorPanel() {
         return;
       }
       await readAdvisorStream(response.body, setJob);
-      setJob((current) => {
-        if (!current || current.status === "completed" || current.status === "failed") {
-          return current;
-        }
-        return {
-          ...current,
-          status: "failed",
-          progress: "Failed",
-          error: "The analysis stopped before it finished.",
-        };
-      });
+      setJob((current) => failIfUnfinished(current, "The analysis stopped before it finished."));
     } catch (error) {
-      if (error instanceof Error && error.name === "AbortError") {
-        let hadJob = false;
-        setJob((current) => {
-          if (!current) return current;
-          hadJob = true;
-          return {
-            ...current,
-            status: "failed",
-            progress: "Failed",
-            error: current.error ?? "The analysis was cancelled.",
-          };
-        });
-        if (!hadJob) setError("The analysis was cancelled.");
-        return;
-      }
-      setError("Could not start the analysis.");
+      const cancelled = error instanceof Error && error.name === "AbortError";
+      setJob((current) =>
+        failIfUnfinished(
+          current,
+          cancelled
+            ? "The analysis was cancelled."
+            : "The analysis stopped before it finished.",
+        ),
+      );
+      if (!cancelled) setError("Could not start the analysis.");
     } finally {
       if (abortRef.current === abort) abortRef.current = null;
       setSubmitting(false);
@@ -122,6 +106,8 @@ export function AdminAdvisorPanel() {
   }
 
   function handleCancel() {
+    setJob((current) => failIfUnfinished(current, "The analysis was cancelled."));
+    setSubmitting(false);
     abortRef.current?.abort();
   }
 
@@ -248,6 +234,19 @@ export function AdminAdvisorPanel() {
       )}
     </div>
   );
+}
+
+function failIfUnfinished(
+  current: AdvisorJobPublic | null,
+  message: string,
+): AdvisorJobPublic | null {
+  if (!current || current.status === "completed" || current.status === "failed") return current;
+  return {
+    ...current,
+    status: "failed",
+    progress: "Failed",
+    error: current.error ?? message,
+  };
 }
 
 async function readAdvisorStream(
