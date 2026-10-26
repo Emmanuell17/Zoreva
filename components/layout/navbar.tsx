@@ -1,11 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
-import { useState } from "react";
-import { useAuth } from "@/components/auth/auth-provider";
+import { usePathname } from "next/navigation";
+import { SignOutButton } from "@/components/auth/sign-out-button";
 import { NotificationDropdown } from "@/components/notifications/notification-dropdown";
-import { Button } from "@/components/ui/button";
 import { getPageTitle, type NavItem } from "@/lib/navigation";
 
 type NavbarProps = {
@@ -20,25 +18,7 @@ export function Navbar({
   showNotifications = false,
 }: NavbarProps) {
   const pathname = usePathname();
-  const router = useRouter();
-  const { configured, signOut } = useAuth();
-  const [signingOut, setSigningOut] = useState(false);
   const title = getPageTitle(pathname, navItems);
-
-  async function handleSignOut() {
-    if (!configured) {
-      router.push("/login");
-      return;
-    }
-
-    setSigningOut(true);
-    try {
-      await signOut();
-      router.push("/login");
-    } finally {
-      setSigningOut(false);
-    }
-  }
 
   return (
     <header className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-border bg-background px-4 pt-[env(safe-area-inset-top)] sm:px-6">
@@ -59,16 +39,7 @@ export function Navbar({
       </div>
       <div className="flex items-center gap-1">
         {showNotifications ? <NotificationDropdown /> : null}
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          loading={signingOut}
-          onClick={handleSignOut}
-          className="md:hidden"
-        >
-          Sign out
-        </Button>
+        <SignOutButton className="md:hidden" />
       </div>
     </header>
   );

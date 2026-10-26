@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { requireManager } from "@/lib/auth/require-manager";
 import {
   beginAdvisorJob,
   createAdvisorJob,
@@ -17,6 +18,11 @@ export const runtime = "nodejs";
 export const maxDuration = 300;
 
 export async function POST(request: Request) {
+  const access = await requireManager(request);
+  if (!access.ok) {
+    return NextResponse.json({ error: access.error }, { status: access.status });
+  }
+
   if (!isInfiniSynapseConfigured()) {
     return NextResponse.json(
       {
@@ -51,11 +57,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: message }, { status: 400 });
   }
 
-  const job = createAdvisorJob({
-    bytes,
-    filename: file.name,
-    mimeType: file.type || "application/octet-stream",
-  });
+  const job = createAdvisorJob(
+    {
+      bytes,
+      filename: file.name,
+      mimeType: file.type || "application/octet-stream",
+    },
+    { uid: access.access.uid, companyId: access.access.companyId },
+  );
   const abort = new AbortController();
   request.signal.addEventListener("abort", () => abort.abort(), { once: true });
   const encoder = new TextEncoder();

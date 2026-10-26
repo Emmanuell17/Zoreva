@@ -11,6 +11,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { useAuth } from "@/components/auth/auth-provider";
 import { EmptyState } from "@/components/ui/empty-state";
 import type { AdvisorJobPublic } from "@/lib/advisor/types";
 
@@ -28,6 +29,7 @@ function badgeForStatus(status: AdvisorJobPublic["status"]) {
 }
 
 export function AdminAdvisorPanel() {
+  const { user, configured } = useAuth();
   const [file, setFile] = useState<File | null>(null);
   const [job, setJob] = useState<AdvisorJobPublic | null>(null);
   const [health, setHealth] = useState<HealthResponse | null>(null);
@@ -35,9 +37,18 @@ export function AdminAdvisorPanel() {
   const [submitting, setSubmitting] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
 
+  const signedIn = Boolean(configured && user);
+
   useEffect(() => {
+    if (!signedIn || !user) return;
     let cancelled = false;
-    void fetch("/api/advisor/health")
+    void user
+      .getIdToken()
+      .then((token) =>
+        fetch("/api/advisor/health", {
+          headers: { Authorization: `Bearer ${token}` },
+        }),
+      )
       .then(async (response) => {
         const body = (await response.json()) as HealthResponse;
         if (!cancelled) setHealth(body);
@@ -54,7 +65,7 @@ export function AdminAdvisorPanel() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [signedIn, user]);
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -69,11 +80,18 @@ export function AdminAdvisorPanel() {
     abortRef.current = abort;
     setSubmitting(true);
     setJob(null);
+    if (!user) {
+      setError("Sign in as a manager to use the advisor.");
+      setSubmitting(false);
+      return;
+    }
     const form = new FormData();
     form.append("file", file);
     try {
+      const token = await user.getIdToken();
       const response = await fetch("/api/advisor/analyze", {
         method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
         body: form,
         signal: abort.signal,
       });
@@ -120,7 +138,14 @@ export function AdminAdvisorPanel() {
         description="Upload a workforce CSV or Excel file. InfiniSynapse reads it for missing, inconsistent, and staffing issues. Zoreva still owns booking rules and the real schedule."
       />
 
-      {health && !health.reachable ? (
+      {!signedIn ? (
+        <p
+          role="status"
+          className="mb-4 rounded-md border border-amber-900/80 bg-amber-950/50 px-3 py-2 text-xs leading-relaxed text-amber-200"
+        >
+          Sign in as a manager to use the advisor.
+        </p>
+      ) : health && !health.reachable ? (
         <p
           role="status"
           className="mb-4 rounded-md border border-amber-900/80 bg-amber-950/50 px-3 py-2 text-xs leading-relaxed text-amber-200"

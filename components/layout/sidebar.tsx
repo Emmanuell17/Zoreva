@@ -1,10 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
-import { useState } from "react";
+import { usePathname } from "next/navigation";
+import { SignOutButton } from "@/components/auth/sign-out-button";
 import { useAuth } from "@/components/auth/auth-provider";
-import { Button } from "@/components/ui/button";
 import { useCompany } from "@/hooks/use-company";
 import { isNavItemActive, type NavItem } from "@/lib/navigation";
 
@@ -16,25 +15,8 @@ type SidebarProps = {
 
 export function Sidebar({ navItems, homeHref, roleLabel }: SidebarProps) {
   const pathname = usePathname();
-  const router = useRouter();
-  const { user, configured, signOut } = useAuth();
+  const { user } = useAuth();
   const company = useCompany();
-  const [signingOut, setSigningOut] = useState(false);
-
-  async function handleSignOut() {
-    if (!configured) {
-      router.push("/login");
-      return;
-    }
-
-    setSigningOut(true);
-    try {
-      await signOut();
-      router.push("/login");
-    } finally {
-      setSigningOut(false);
-    }
-  }
 
   return (
     <aside className="hidden w-48 shrink-0 flex-col border-r border-border bg-background md:flex lg:w-56">
@@ -76,16 +58,7 @@ export function Sidebar({ navItems, homeHref, roleLabel }: SidebarProps) {
         ) : (
           <p className="mt-0.5 text-xs text-zinc-600">Shift coordination</p>
         )}
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          loading={signingOut}
-          onClick={handleSignOut}
-          className="mt-3 w-full justify-start px-0 text-zinc-500 hover:bg-transparent hover:text-foreground"
-        >
-          Sign out
-        </Button>
+        <SignOutButton className="mt-3 w-full justify-start px-0 text-zinc-500 hover:bg-transparent hover:text-foreground" />
       </div>
     </aside>
   );

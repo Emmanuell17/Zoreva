@@ -1,11 +1,9 @@
 import type { Company, CompanyMembership } from "@/types";
-import {
-  saveCompanyRemote,
-  saveMembershipRemote,
-} from "@/lib/company/cloud";
+import { createManagerWorkspaceRemote } from "@/lib/company/cloud";
 import { generateJoinCode, normalizeJoinCode } from "@/lib/company/join-code";
 import { LOCAL_OWNER_ID } from "@/lib/company/defaults";
 import { normalizeEmail } from "@/lib/company/email";
+import { JOIN_CODE_MAX_LENGTH, JOIN_CODE_MIN_LENGTH, JOIN_CODE_TTL_MS, joinCodeIsCurrent } from "@/lib/security/policy";
 
 const WORKSPACES_KEY = "zoreva:workspaces";
 const OWNERS_KEY = "zoreva:owner-company";
@@ -172,59 +170,79 @@ export function saveMembership(membership: CompanyMembership) {
   const memberships = getMembershipMap();
   memberships[membership.userId] = membership;
   writeJson(MEMBERSHIPS_KEY, memberships);
-  void saveMembershipRemote(membership).catch(() => undefined);
 }
 
-export async function persistMembership(membership: CompanyMembership) {
-  const memberships = getMembershipMap();
-  memberships[membership.userId] = membership;
-  writeJson(MEMBERSHIPS_KEY, memberships);
-  try {
-    await saveMembershipRemote(membership);
-  } catch {
-    // Local membership still lets this device open the company.
+export function withSecureJoinCode(
+  company: Company,
+  now = Date.now(),
+): { company: Company; previousJoinCode: string | null } {
+  const previous = normalizeJoinCode(company.joinCode);
+  const expiresAt = company.joinCodeExpiresAt ? Date.parse(company.joinCodeExpiresAt) : NaN;
+  if (joinCodeIsCurrent(previous, expiresAt, now)) {
+    return {
+      company: {
+        ...company,
+        joinCode: previous,
+        joinCodeExpiresAt: new Date(expiresAt).toISOString(),
+      },
+      previousJoinCode: null,
+    };
   }
-  return membership;
+
+  return {
+    company: {
+      ...company,
+      joinCode: uniqueJoinCode(),
+      joinCodeExpiresAt: new Date(now + JOIN_CODE_TTL_MS).toISOString(),
+    },
+    previousJoinCode: previous || null,
+  };
 }
 
 export function uniqueJoinCode(existing?: string): string {
-  if (existing && normalizeJoinCode(existing)) return normalizeJoinCode(existing);
+  const normalized = existing ? normalizeJoinCode(existing) : "";
+  if (
+    normalized.length >= JOIN_CODE_MIN_LENGTH &&
+    normalized.length <= JOIN_CODE_MAX_LENGTH
+  ) {
+    return normalized;
+  }
 
   const used = new Set(Object.keys(getJoinCodeMap()));
   for (let attempt = 0; attempt < 12; attempt += 1) {
     const code = generateJoinCode();
     if (!used.has(code)) return code;
   }
-  return generateJoinCode(8);
+  return generateJoinCode(12);
 }
 
 export function saveCompanyLocal(company: Company) {
-  const joinCode = uniqueJoinCode(company.joinCode);
-  const next: Company = { ...company, joinCode };
+  const next: Company = { ...company, joinCode: normalizeJoinCode(company.joinCode) };
   const workspaces = getWorkspaces();
   workspaces[next.id] = next;
   writeJson(WORKSPACES_KEY, workspaces);
 
-  const owners = getOwnerMap();
-  owners[next.ownerId] = next.id;
-  writeJson(OWNERS_KEY, owners);
-  saveJoinCode(joinCode, next.id);
+  if (next.ownerId) {
+    const owners = getOwnerMap();
+    owners[next.ownerId] = next.id;
+    writeJson(OWNERS_KEY, owners);
+  }
+  if (next.joinCode) saveJoinCode(next.joinCode, next.id);
   saveOwnerEmail(next.email, next.id);
   return next;
 }
 
 export function saveCompany(company: Company) {
-  const next = saveCompanyLocal(company);
-  void saveCompanyRemote(next).catch(() => undefined);
-  return next;
+  return saveCompanyLocal(company);
 }
 
-export async function persistCompany(company: Company) {
-  const next = saveCompanyLocal(company);
-  try {
-    await saveCompanyRemote(next);
-  } catch {
-    // Local workspace still works on this device.
+export async function persistCompany(
+  company: Company,
+  options?: { mode?: "create" | "local"; authEmail?: string | null },
+) {
+  const secured = withSecureJoinCode(company).company;
+  if (options?.mode === "create") {
+    await createManagerWorkspaceRemote(secured, options.authEmail ?? secured.email);
   }
-  return next;
+  return saveCompanyLocal(secured);
 }

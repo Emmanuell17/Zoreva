@@ -1,15 +1,21 @@
 import { NextResponse } from "next/server";
-import { failJob, getAdvisorJob, toPublicJob } from "@/lib/advisor/store";
+import { requireManager } from "@/lib/auth/require-manager";
+import { failJob, getAdvisorJobForOwner, toPublicJob } from "@/lib/advisor/store";
 import { cancelInfiniSynapseTask } from "@/lib/infinisynapse/client";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(
-  _request: Request,
+  request: Request,
   context: { params: Promise<{ id: string }> },
 ) {
+  const access = await requireManager(request);
+  if (!access.ok) {
+    return NextResponse.json({ error: access.error }, { status: access.status });
+  }
+
   const { id } = await context.params;
-  const job = getAdvisorJob(id);
+  const job = getAdvisorJobForOwner(id, access.access.uid);
   if (!job) {
     return NextResponse.json({ error: "That analysis was not found." }, { status: 404 });
   }

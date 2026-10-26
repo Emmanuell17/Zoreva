@@ -219,13 +219,13 @@ export function JoinCompanyForm({ initialCode = "" }: JoinCompanyFormProps) {
           autoCapitalize="characters"
           autoCorrect="off"
           spellCheck={false}
-          placeholder="ABC-123"
+          placeholder="ABCDE-23456"
           onChange={(event) => {
             setCode(formatJoinCode(event.target.value));
             setError(null);
           }}
           error={error ?? undefined}
-          hint="6 characters. Letters and numbers."
+          hint="10 characters. Letters and numbers."
         />
 
         {signedIn && !isManager ? (

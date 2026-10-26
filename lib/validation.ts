@@ -131,8 +131,8 @@ export function validatePositions(value: string): string | undefined {
 export function validateJoinCode(value: string): string | undefined {
   const compact = value.toUpperCase().replace(/[^A-Z0-9]/g, "");
   if (!compact) return "Join code is required.";
-  if (compact.length < 6) {
-    return "Enter the 6-character code from your manager.";
+  if (compact.length < 10 || compact.length > 12) {
+    return "Enter the 10-character code from your manager.";
   }
   return undefined;
 }

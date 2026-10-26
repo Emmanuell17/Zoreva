@@ -151,19 +151,23 @@ export function CompanySetupForm() {
     setSubmitting(true);
     setRole("ADMIN");
     try {
-      await persistNewCompanyWorkspace(ownerId, {
-        companyName: form.companyName,
-        managerName,
-        email: user?.email || email,
-        employeeCount: Number(form.employeeCount),
-        shiftTemplates: form.shifts.map((shift) => ({
-          name: shift.name,
-          startTime: shift.startTime,
-          endTime: shift.endTime,
-          slots: Number(shift.slots),
-          positions: [],
-        })),
-      });
+      await persistNewCompanyWorkspace(
+        ownerId,
+        {
+          companyName: form.companyName,
+          managerName,
+          email: user?.email || email,
+          employeeCount: Number(form.employeeCount),
+          shiftTemplates: form.shifts.map((shift) => ({
+            name: shift.name,
+            startTime: shift.startTime,
+            endTime: shift.endTime,
+            slots: Number(shift.slots),
+            positions: [],
+          })),
+        },
+        user?.email,
+      );
       router.replace("/admin");
     } catch {
       setErrors({

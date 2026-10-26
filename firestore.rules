@@ -1,22 +1,371 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Portfolio MVP: join codes must be readable from another device.
-    // Tighten these before any real production use.
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function authEmail() {
+      return signedIn() && request.auth.token.email is string
+        ? request.auth.token.email.lower()
+        : '';
+    }
+
+    function joinCodeDoc(code) {
+      return get(/databases/$(database)/documents/joinCodes/$(code)).data;
+    }
+
+    function memberPath() {
+      return /databases/$(database)/documents/memberships/$(request.auth.uid);
+    }
+
+    function companyPath(companyId) {
+      return /databases/$(database)/documents/companies/$(companyId);
+    }
+
+    function memberData() {
+      return getAfter(memberPath()).data;
+    }
+
+    function ownsCompany(companyId) {
+      return signedIn()
+        && getAfter(companyPath(companyId)).data.ownerId == request.auth.uid;
+    }
+
+    function isManager(companyId) {
+      return ownsCompany(companyId)
+        && memberData().userId == request.auth.uid
+        && memberData().role == 'ADMIN'
+        && memberData().companyId == companyId;
+    }
+
+    function isEmployee(companyId) {
+      return signedIn()
+        && memberData().userId == request.auth.uid
+        && memberData().role == 'EMPLOYEE'
+        && memberData().companyId == companyId;
+    }
+
+    function isMember(companyId) {
+      return isManager(companyId) || isEmployee(companyId);
+    }
+
+    function validCompany(data) {
+      return data.keys().hasOnly([
+          'id',
+          'ownerId',
+          'companyName',
+          'managerName',
+          'email',
+          'employeeCount',
+          'shiftTemplates',
+          'setupCompletedAt',
+          'joinCode',
+          'joinCodeExpiresAt'
+        ])
+        && data.id is string
+        && data.id.size() > 0
+        && data.id.size() < 80
+        && data.ownerId is string
+        && data.companyName is string
+        && data.companyName.size() > 0
+        && data.companyName.size() < 200
+        && data.managerName is string
+        && data.managerName.size() < 200
+        && data.email is string
+        && data.email.size() < 200
+        && data.employeeCount is int
+        && data.employeeCount >= 1
+        && data.employeeCount <= 500
+        && data.shiftTemplates is list
+        && data.setupCompletedAt is string
+        && data.setupCompletedAt.size() < 40
+        && data.joinCode is string
+        && data.joinCode.size() >= 10
+        && data.joinCode.size() <= 12
+        && data.joinCode.matches('^[A-Z0-9]+$')
+        && data.joinCodeExpiresAt is int
+        && data.joinCodeExpiresAt > 0;
+    }
+
+    function joinExpiryWindow(expiresAt) {
+      return expiresAt > request.time.toMillis()
+        && expiresAt <= request.time.toMillis() + 2678400000;
+    }
+
     match /companies/{companyId} {
-      allow read, write: if true;
+      allow get: if signedIn() && resource.data.ownerId == request.auth.uid;
+      allow list: if false;
+
+      allow create: if signedIn()
+        && request.auth.uid == request.resource.data.ownerId
+        && request.resource.data.id == companyId
+        && validCompany(request.resource.data)
+        && joinExpiryWindow(request.resource.data.joinCodeExpiresAt);
+
+      allow update: if isManager(companyId)
+        && request.resource.data.ownerId == resource.data.ownerId
+        && request.resource.data.ownerId == request.auth.uid
+        && request.resource.data.id == resource.data.id
+        && request.resource.data.setupCompletedAt == resource.data.setupCompletedAt
+        && validCompany(request.resource.data)
+        && (
+          (
+            request.resource.data.joinCode == resource.data.joinCode
+            && request.resource.data.joinCodeExpiresAt == resource.data.joinCodeExpiresAt
+          )
+          || joinExpiryWindow(request.resource.data.joinCodeExpiresAt)
+        );
+
+      allow delete: if false;
+
+      match /published/{docId} {
+        allow get: if docId == 'schedule' && isMember(companyId);
+        allow list: if false;
+        allow create, update: if docId == 'schedule'
+          && isManager(companyId)
+          && request.resource.data.keys().hasOnly(['companyName', 'shiftTemplates', 'shifts'])
+          && request.resource.data.companyName is string
+          && request.resource.data.companyName.size() > 0
+          && request.resource.data.companyName.size() < 200
+          && request.resource.data.shiftTemplates is list
+          && request.resource.data.shifts is list;
+        allow delete: if false;
+      }
+
+      match /roster/{employeeId} {
+        allow read: if isMember(companyId);
+
+        allow create: if request.resource.data.keys().hasOnly([
+            'id', 'name', 'role', 'companyId', 'createdAt'
+          ])
+          && request.resource.data.id == employeeId
+          && request.resource.data.companyId == companyId
+          && request.resource.data.role == 'EMPLOYEE'
+          && request.resource.data.name is string
+          && request.resource.data.name.size() > 0
+          && request.resource.data.name.size() < 120
+          && request.resource.data.createdAt is string
+          && request.resource.data.createdAt.size() < 40
+          && (
+            (
+              isManager(companyId)
+            )
+            || (
+              isEmployee(companyId)
+              && employeeId == companyId + '_' + request.auth.uid
+              && memberData().employeeId == employeeId
+            )
+          );
+
+        allow update: if isManager(companyId)
+          && resource.data.role == 'EMPLOYEE'
+          && request.resource.data.role == 'EMPLOYEE'
+          && request.resource.data.id == resource.data.id
+          && request.resource.data.companyId == resource.data.companyId
+          && request.resource.data.keys().hasOnly([
+            'id', 'name', 'role', 'companyId', 'createdAt'
+          ])
+          && request.resource.data.name is string
+          && request.resource.data.name.size() > 0
+          && request.resource.data.name.size() < 120;
+
+        allow delete: if false;
+      }
+
+      match /directory/{employeeId} {
+        allow get: if isManager(companyId)
+          || (
+            isEmployee(companyId)
+            && employeeId == companyId + '_' + request.auth.uid
+          );
+        allow list: if isManager(companyId);
+
+        allow create: if request.resource.data.keys().hasOnly(['email'])
+          && request.resource.data.email is string
+          && request.resource.data.email.size() > 3
+          && request.resource.data.email.size() < 200
+          && (
+            isManager(companyId)
+            || (
+              isEmployee(companyId)
+              && employeeId == companyId + '_' + request.auth.uid
+              && request.resource.data.email.lower() == authEmail()
+              && authEmail().size() > 3
+            )
+          );
+
+        allow update: if isManager(companyId)
+          && request.resource.data.keys().hasOnly(['email'])
+          && request.resource.data.email is string
+          && request.resource.data.email.size() > 3
+          && request.resource.data.email.size() < 200;
+
+        allow delete: if false;
+      }
+
+      match /signups/{signupId} {
+        allow read: if isMember(companyId);
+
+        allow create: if isEmployee(companyId)
+          && request.resource.data.keys().hasOnly([
+            'shiftId', 'employeeId', 'status', 'selectedAt', 'confirmedAt'
+          ])
+          && request.resource.data.employeeId == memberData().employeeId
+          && request.resource.data.status == 'SELECTED'
+          && request.resource.data.shiftId is string
+          && request.resource.data.shiftId.size() > 0
+          && request.resource.data.shiftId.size() < 120
+          && request.resource.data.selectedAt is string
+          && request.resource.data.selectedAt.size() < 40
+          && request.resource.data.confirmedAt == null;
+
+        allow update: if isEmployee(companyId)
+          && resource.data.employeeId == memberData().employeeId
+          && request.resource.data.employeeId == resource.data.employeeId
+          && request.resource.data.shiftId == resource.data.shiftId
+          && request.resource.data.selectedAt == resource.data.selectedAt
+          && resource.data.status == 'SELECTED'
+          && request.resource.data.status == 'CONFIRMED'
+          && request.resource.data.keys().hasOnly([
+            'shiftId', 'employeeId', 'status', 'selectedAt', 'confirmedAt'
+          ])
+          && request.resource.data.confirmedAt is string;
+
+        allow delete: if isEmployee(companyId)
+          && resource.data.employeeId == memberData().employeeId;
+      }
+
+      match /hours/{hoursId} {
+        allow read: if isManager(companyId)
+          || (
+            isEmployee(companyId)
+            && resource.data.employeeId == memberData().employeeId
+          );
+
+        allow create: if isEmployee(companyId)
+          && request.resource.data.keys().hasOnly([
+            'shiftId', 'employeeId', 'startTime', 'endTime', 'note', 'status', 'submittedAt'
+          ])
+          && request.resource.data.employeeId == memberData().employeeId
+          && request.resource.data.status == 'SUBMITTED'
+          && request.resource.data.shiftId is string
+          && request.resource.data.shiftId.size() > 0
+          && request.resource.data.shiftId.size() < 120
+          && request.resource.data.startTime is string
+          && request.resource.data.startTime.size() < 16
+          && request.resource.data.endTime is string
+          && request.resource.data.endTime.size() < 16
+          && request.resource.data.note is string
+          && request.resource.data.note.size() <= 500
+          && request.resource.data.submittedAt is string
+          && request.resource.data.submittedAt.size() < 40;
+
+        allow update, delete: if false;
+      }
     }
-    match /owners/{ownerId} {
-      allow read, write: if true;
-    }
-    match /joinCodes/{code} {
-      allow read, write: if true;
-    }
-    match /emails/{email} {
-      allow read, write: if true;
-    }
+
     match /memberships/{userId} {
-      allow read, write: if true;
+      allow get: if signedIn() && request.auth.uid == userId;
+      allow list: if false;
+      allow update, delete: if false;
+
+      allow create: if signedIn()
+        && request.auth.uid == userId
+        && request.resource.data.keys().hasOnly([
+          'userId', 'companyId', 'employeeId', 'role'
+        ])
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.companyId is string
+        && request.resource.data.employeeId == request.resource.data.companyId + '_' + request.auth.uid
+        && (
+          (
+            request.resource.data.role == 'ADMIN'
+            && getAfter(companyPath(request.resource.data.companyId)).data.ownerId == request.auth.uid
+          )
+          || (
+            request.resource.data.role == 'EMPLOYEE'
+            && getAfter(companyPath(request.resource.data.companyId)).data.ownerId != request.auth.uid
+            && getAfter(/databases/$(database)/documents/joinReceipts/$(request.auth.uid)).data.companyId
+              == request.resource.data.companyId
+            && joinCodeDoc(getAfter(/databases/$(database)/documents/joinReceipts/$(request.auth.uid)).data.code).companyId
+              == request.resource.data.companyId
+            && joinCodeDoc(getAfter(/databases/$(database)/documents/joinReceipts/$(request.auth.uid)).data.code).expiresAt
+              > request.time.toMillis()
+          )
+        );
+    }
+
+    match /joinReceipts/{userId} {
+      allow get, list: if false;
+      allow update, delete: if false;
+      allow create: if signedIn()
+        && request.auth.uid == userId
+        && request.resource.data.keys().hasOnly(['companyId', 'code', 'createdAt'])
+        && request.resource.data.companyId is string
+        && request.resource.data.code is string
+        && request.resource.data.code.size() >= 10
+        && request.resource.data.code.size() <= 12
+        && request.resource.data.code.matches('^[A-Z0-9]+$')
+        && request.resource.data.createdAt is int
+        && request.resource.data.createdAt <= request.time.toMillis() + 60000
+        && request.resource.data.createdAt >= request.time.toMillis() - 600000
+        && joinCodeDoc(request.resource.data.code).companyId == request.resource.data.companyId
+        && joinCodeDoc(request.resource.data.code).expiresAt > request.time.toMillis()
+        && getAfter(/databases/$(database)/documents/memberships/$(request.auth.uid)).data.role == 'EMPLOYEE'
+        && getAfter(/databases/$(database)/documents/memberships/$(request.auth.uid)).data.companyId
+          == request.resource.data.companyId
+        && getAfter(/databases/$(database)/documents/memberships/$(request.auth.uid)).data.userId
+          == request.auth.uid;
+    }
+
+    match /joinCodes/{code} {
+      allow get: if signedIn()
+        && code.size() >= 10
+        && code.size() <= 12
+        && code.matches('^[A-Z0-9]+$')
+        && resource.data.keys().hasOnly(['companyId', 'expiresAt'])
+        && resource.data.expiresAt is int
+        && resource.data.expiresAt > request.time.toMillis();
+      allow list: if false;
+
+      allow create: if code.size() >= 10
+        && code.size() <= 12
+        && code.matches('^[A-Z0-9]+$')
+        && isManager(request.resource.data.companyId)
+        && request.resource.data.keys().hasOnly(['companyId', 'expiresAt'])
+        && request.resource.data.expiresAt is int
+        && joinExpiryWindow(request.resource.data.expiresAt)
+        && getAfter(companyPath(request.resource.data.companyId)).data.joinCode == code
+        && getAfter(companyPath(request.resource.data.companyId)).data.ownerId == request.auth.uid;
+
+      allow update: if false;
+      allow delete: if signedIn()
+        && resource.data.companyId is string
+        && isManager(resource.data.companyId);
+    }
+
+    match /owners/{ownerId} {
+      allow get: if signedIn() && request.auth.uid == ownerId;
+      allow list: if false;
+      allow update, delete: if false;
+      allow create: if signedIn()
+        && request.auth.uid == ownerId
+        && request.resource.data.keys().hasOnly(['companyId'])
+        && request.resource.data.companyId is string
+        && getAfter(companyPath(request.resource.data.companyId)).data.ownerId == request.auth.uid;
+    }
+
+    match /emails/{emailId} {
+      allow get: if signedIn() && authEmail() == emailId && emailId.size() > 3;
+      allow list: if false;
+      allow update, delete: if false;
+      allow create: if signedIn()
+        && authEmail() == emailId
+        && emailId.size() > 3
+        && request.resource.data.keys().hasOnly(['companyId'])
+        && request.resource.data.companyId is string
+        && getAfter(companyPath(request.resource.data.companyId)).data.ownerId == request.auth.uid;
     }
   }
 }

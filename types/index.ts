@@ -27,6 +27,7 @@ export type Company = {
   id: string;
   ownerId: string;
   joinCode: string;
+  joinCodeExpiresAt?: string;
   companyName: string;
   managerName: string;
   email: string;

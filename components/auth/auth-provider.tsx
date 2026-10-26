@@ -99,8 +99,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     ) => {
       const gen = ++syncGen.current;
       syncLocalWorkspace(nextRole, uid, email);
-      await hydrateWorkspace({ role: nextRole, uid, email, configured });
-      return gen === syncGen.current;
+      const trusted = await hydrateWorkspace({ role: nextRole, uid, email, configured });
+      return { current: gen === syncGen.current, role: trusted.role };
     },
     [configured, syncLocalWorkspace],
   );
@@ -147,10 +147,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const nextRole = nextUser ? (pendingRole ?? getStoredRole()) : null;
         if (nextUser && pendingRole) setStoredRole(pendingRole);
         void (async () => {
-          await syncWorkspace(nextRole, nextUser?.uid, nextUser?.email);
-          if (cancelled) return;
+          const trusted = await syncWorkspace(nextRole, nextUser?.uid, nextUser?.email);
+          if (cancelled || !trusted.current) return;
+          const resolvedRole = trusted.role ?? nextRole;
+          if (nextUser && resolvedRole && resolvedRole !== nextRole) {
+            setStoredRole(resolvedRole);
+          }
           setUser(nextUser);
-          setRoleState(nextRole);
+          setRoleState(resolvedRole);
           setLoading(false);
           setReady(true);
           if (nextUser) {
@@ -195,9 +199,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         });
 
         if (result) {
-          await syncWorkspace(result.role, result.user.uid, result.user.email);
+          const trusted = await syncWorkspace(result.role, result.user.uid, result.user.email);
+          if (!trusted.current) return result.user;
+          const resolvedRole = trusted.role ?? result.role;
+          if (resolvedRole && resolvedRole !== result.role) setStoredRole(resolvedRole);
           setUser(result.user);
-          setRoleState(result.role);
+          setRoleState(resolvedRole);
           setLoading(false);
           setReady(true);
           return result.user;
@@ -215,7 +222,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setRole(nextRole) {
         setStoredRole(nextRole);
         setRoleState(nextRole);
-        void syncWorkspace(nextRole, user?.uid, user?.email);
+        void syncWorkspace(nextRole, user?.uid, user?.email).then((trusted) => {
+          if (trusted.role && trusted.role !== nextRole) {
+            setStoredRole(trusted.role);
+            setRoleState(trusted.role);
+          }
+        });
       },
       clearRedirectError() {
         setRedirectError(null);

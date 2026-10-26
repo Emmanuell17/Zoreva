@@ -1,6 +1,6 @@
 const ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
-export function generateJoinCode(length = 6): string {
+export function generateJoinCode(length = 10): string {
   const bytes = new Uint8Array(length);
   if (typeof crypto !== "undefined" && crypto.getRandomValues) {
     crypto.getRandomValues(bytes);
@@ -19,6 +19,7 @@ export function normalizeJoinCode(value: string): string {
 
 export function formatJoinCode(value: string): string {
   const code = normalizeJoinCode(value);
+  if (code.length === 10) return `${code.slice(0, 5)}-${code.slice(5)}`;
   if (code.length === 6) return `${code.slice(0, 3)}-${code.slice(3)}`;
   return code;
 }

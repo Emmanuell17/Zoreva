@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { requireManager } from "@/lib/auth/require-manager";
 import { pingInfiniSynapse } from "@/lib/infinisynapse/client";
 import {
   InfiniSynapseApiError,
@@ -8,7 +9,12 @@ import {
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(request: Request) {
+  const access = await requireManager(request);
+  if (!access.ok) {
+    return NextResponse.json({ error: access.error }, { status: access.status });
+  }
+
   if (!isInfiniSynapseConfigured()) {
     return NextResponse.json(
       {

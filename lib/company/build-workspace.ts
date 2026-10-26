@@ -1,4 +1,5 @@
 import { uniqueJoinCode } from "@/lib/company/persistence";
+import { JOIN_CODE_TTL_MS } from "@/lib/security/policy";
 import type { Company, CompanySetupInput, User } from "@/types";
 
 function slugify(value: string): string {
@@ -45,6 +46,7 @@ export function buildCompanyWorkspace(
     id,
     ownerId,
     joinCode,
+    joinCodeExpiresAt: new Date(Date.parse(now) + JOIN_CODE_TTL_MS).toISOString(),
     companyName: input.companyName.trim(),
     managerName: input.managerName.trim(),
     email: input.email.trim(),

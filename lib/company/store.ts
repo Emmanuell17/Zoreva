@@ -3,16 +3,23 @@ import { shiftsSeed } from "@/lib/mocks/shifts";
 import { signupsSeed } from "@/lib/mocks/signups";
 import { CURRENT_EMPLOYEE_ID, usersSeed } from "@/lib/mocks/users";
 import {
+  JoinFailed,
+  ensureOwnerMembershipRemote,
+  isPermissionDenied,
+  joinCompanyRemote,
   loadCompanyIdForEmailRemote,
-  loadCompanyIdForJoinCodeRemote,
   loadCompanyIdForOwnerRemote,
-  loadCompanyRemote,
+  loadEmployeeCompanyRemote,
+  loadManagerCompanyRemote,
   loadMembershipRemote,
-  watchCompanyRemote,
+  migrateManagerWorkspaceRemote,
+  syncEmployeeActivityRemote,
+  updatePublishedScheduleRemote,
+  watchEmployeeWorkspace,
+  watchManagerWorkspace,
 } from "@/lib/company/cloud";
 import { attachAuthEmployee } from "@/lib/company/membership";
 import {
-  companyMatchesManager,
   findLocalCompanyForManager,
   getCompanyById,
   getCompanyIdForJoinCode,
@@ -20,21 +27,18 @@ import {
   hasCompletedSetup as readCompletedSetup,
   hasJoinedCompany as readJoinedCompany,
   persistCompany,
-  persistMembership,
-  saveCompany,
   saveCompanyLocal,
   saveMembership,
   saveOwnerEmail,
-  uniqueJoinCode,
+  withSecureJoinCode,
 } from "@/lib/company/persistence";
-import { LOCAL_OWNER_ID } from "@/lib/company/defaults";
 import { normalizeJoinCode } from "@/lib/company/join-code";
-import { normalizeEmail } from "@/lib/company/email";
+import { canUseFirestore } from "@/lib/firebase/firestore";
+import { redactCompanyForMember } from "@/lib/security/policy";
 import { isShiftDatePassed } from "@/lib/shift-utils";
 import { buildCompanyWorkspace } from "@/lib/company/build-workspace";
 import type {
   Company,
-  CompanyMembership,
   CompanySetupInput,
   HoursEntry,
   Role,
@@ -59,6 +63,19 @@ let currentEmployeeId = CURRENT_EMPLOYEE_ID;
 let applyingSchedule = false;
 let scheduleBridge: ScheduleBridge | null = null;
 let remoteUnsub: Unsubscribe | null = null;
+
+type SessionAccess = {
+  uid: string;
+  role: Role;
+  companyId: string;
+  employeeId: string;
+};
+
+let session: SessionAccess | null = null;
+
+function setSession(next: SessionAccess | null) {
+  session = next;
+}
 
 const listeners = new Set<() => void>();
 
@@ -109,14 +126,34 @@ function onWorkspaceVisible() {
   if (document.visibilityState === "visible") dropPassedShifts();
 }
 
+function acceptRemoteCompany(company: Company) {
+  if (applyingSchedule) return;
+  if (!activeCompany || activeCompany.id !== company.id || !session) return;
+  const view =
+    session.role === "EMPLOYEE"
+      ? redactCompanyForMember(company, {
+          uid: session.uid,
+          membership: {
+            userId: session.uid,
+            companyId: session.companyId,
+            employeeId: session.employeeId,
+            role: "EMPLOYEE",
+          },
+        })
+      : company;
+  if (!view) return;
+  saveCompanyLocal(view);
+  applyCompany(view, { persist: false, employeeId: session.employeeId });
+}
+
 function startWatch(companyId: string) {
   stopWatch();
-  remoteUnsub = watchCompanyRemote(companyId, (company) => {
-    if (applyingSchedule) return;
-    if (!activeCompany || activeCompany.id !== company.id) return;
-    saveCompanyLocal(company);
-    applyCompany(company, { persist: false });
-  });
+  if (session?.companyId === companyId) {
+    remoteUnsub =
+      session.role === "ADMIN"
+        ? watchManagerWorkspace(companyId, acceptRemoteCompany)
+        : watchEmployeeWorkspace(companyId, session.employeeId, acceptRemoteCompany);
+  }
   if (typeof document !== "undefined") {
     document.addEventListener("visibilitychange", onWorkspaceVisible);
   }
@@ -151,13 +188,24 @@ export function registerScheduleBridge(bridge: ScheduleBridge) {
 export function persistActiveSchedule(state: ScheduleState) {
   if (applyingSchedule || !activeCompany) return;
 
-  activeCompany = {
+  const previous = activeCompany;
+  activeCompany = saveCompanyLocal({
     ...activeCompany,
     shifts: state.shifts.map((shift) => ({ ...shift })),
     signups: state.signups.map((signup) => ({ ...signup })),
     hours: state.hours.map((entry) => ({ ...entry })),
-  };
-  saveCompany(activeCompany);
+  });
+  if (!session || session.companyId !== activeCompany.id || !canUseFirestore()) return;
+  if (session.role === "ADMIN") {
+    void updatePublishedScheduleRemote(activeCompany).catch(() => undefined);
+    return;
+  }
+  void syncEmployeeActivityRemote(
+    session.companyId,
+    session.employeeId,
+    previous,
+    activeCompany,
+  ).catch(() => undefined);
 }
 
 function applyCompany(
@@ -185,7 +233,10 @@ function applyCompany(
   applyingSchedule = false;
 
   if (next && (pruned || options?.persist !== false)) {
-    saveCompany(next);
+    activeCompany = saveCompanyLocal(next);
+    if (session?.role === "ADMIN" && session.companyId === next.id && canUseFirestore()) {
+      void updatePublishedScheduleRemote(activeCompany).catch(() => undefined);
+    }
   }
 
   notify();
@@ -193,6 +244,7 @@ function applyCompany(
 
 export function activateDemoWorkspace() {
   stopWatch();
+  setSession(null);
   if (activeCompany === null && typeof window === "undefined") return;
   applyCompany(null);
 }
@@ -234,15 +286,13 @@ export function activateWorkspaceForMember(userId: string | null | undefined) {
     return false;
   }
 
-  activateCompany(ensureJoinCode(company), membership.employeeId);
+  activateCompany(company, membership.employeeId);
   return true;
 }
 
 function ensureJoinCode(company: Company): Company {
-  if (normalizeJoinCode(company.joinCode)) {
-    return saveCompanyLocal(company);
-  }
-  return saveCompany({ ...company, joinCode: uniqueJoinCode() });
+  if (normalizeJoinCode(company.joinCode)) return saveCompanyLocal(company);
+  return saveCompanyLocal(withSecureJoinCode(company).company);
 }
 
 export function hasCompletedSetup(
@@ -259,9 +309,19 @@ export function hasJoinedCompany(userId: string | null | undefined): boolean {
 export async function persistNewCompanyWorkspace(
   ownerId: string,
   input: CompanySetupInput,
+  authEmail?: string | null,
 ): Promise<Company> {
   const company = buildCompanyWorkspace(ownerId, input);
-  const saved = await persistCompany(company);
+  const saved = await persistCompany(company, {
+    mode: canUseFirestore() ? "create" : "local",
+    authEmail: authEmail ?? input.email,
+  });
+  setSession({
+    uid: ownerId,
+    role: "ADMIN",
+    companyId: saved.id,
+    employeeId: `${saved.id}_${ownerId}`,
+  });
   activateCompany(saved);
   return saved;
 }
@@ -275,46 +335,72 @@ export function ownerIdFromAuth(options: {
   return null;
 }
 
-async function claimCompanyForManager(
-  company: Company,
-  options: { ownerId: string; email?: string | null },
-): Promise<Company> {
+async function publishManagerCompany(company: Company, uid: string): Promise<Company | null> {
+  if (company.ownerId !== uid) return null;
+  const rotated = withSecureJoinCode(company);
+  const membership = await loadMembershipRemote(uid);
   if (
-    company.ownerId &&
-    company.ownerId !== LOCAL_OWNER_ID &&
-    company.ownerId !== options.ownerId
+    membership &&
+    (membership.userId !== uid ||
+      membership.role !== "ADMIN" ||
+      membership.companyId !== company.id)
   ) {
-    return company;
+    return null;
   }
-
-  const email = options.email?.trim() ?? "";
-  const next: Company = {
-    ...company,
-    ownerId: options.ownerId,
-    email: company.email || email,
-  };
-  const unchanged =
-    next.ownerId === company.ownerId &&
-    normalizeEmail(next.email) === normalizeEmail(company.email);
-  const saved = unchanged
-    ? ensureJoinCode(next)
-    : await persistCompany(ensureJoinCode(next));
-  if (email) saveOwnerEmail(email, saved.id);
-  return saved;
+  if (!membership) {
+    try {
+      await ensureOwnerMembershipRemote(rotated.company);
+    } catch (error) {
+      if (isPermissionDenied(error)) return null;
+      throw error;
+    }
+  }
+  try {
+    await migrateManagerWorkspaceRemote(rotated.company, rotated.previousJoinCode);
+  } catch (error) {
+    if (isPermissionDenied(error)) return null;
+    throw error;
+  }
+  return saveCompanyLocal(rotated.company);
 }
 
-async function cacheRemoteCompany(companyId: string | null | undefined) {
-  if (!companyId) return null;
-  const local = getCompanyById(companyId);
-  try {
-    const remote = await loadCompanyRemote(companyId);
-    if (remote) {
-      return saveCompanyLocal(remote);
-    }
-  } catch {
-    // Fall back to the local copy if Firestore is unreachable.
-  }
-  return local ? ensureJoinCode(local) : null;
+function activateManager(company: Company, uid: string) {
+  setSession({
+    uid,
+    role: "ADMIN",
+    companyId: company.id,
+    employeeId: `${company.id}_${uid}`,
+  });
+  activateCompany(company);
+}
+
+function activateEmployee(company: Company, uid: string, employeeId: string) {
+  const view =
+    redactCompanyForMember(
+      { ...company, id: company.id },
+      {
+        uid,
+        membership: {
+          userId: uid,
+          companyId: company.id,
+          employeeId,
+          role: "EMPLOYEE",
+        },
+      },
+    ) ?? company;
+  setSession({
+    uid,
+    role: "EMPLOYEE",
+    companyId: company.id,
+    employeeId,
+  });
+  saveMembership({
+    userId: uid,
+    companyId: company.id,
+    employeeId,
+    role: "EMPLOYEE",
+  });
+  activateCompany(saveCompanyLocal(view), employeeId);
 }
 
 export async function hydrateWorkspace(options: {
@@ -322,71 +408,105 @@ export async function hydrateWorkspace(options: {
   uid?: string | null;
   email?: string | null;
   configured: boolean;
-}): Promise<void> {
+}): Promise<{ role: Role | null }> {
   const ownerId = ownerIdFromAuth({
     uid: options.uid,
     configured: options.configured,
   });
 
-  if (options.role === "ADMIN" && ownerId) {
-    let company = findLocalCompanyForManager({
-      ownerId,
-      email: options.email,
-    });
-
-    if (!company) {
-      let remoteId: string | null = null;
-      try {
-        remoteId = await loadCompanyIdForOwnerRemote(ownerId);
-        if (!remoteId) {
-          remoteId = await loadCompanyIdForEmailRemote(options.email);
+  if (options.configured && options.uid && canUseFirestore()) {
+    const membership = await loadMembershipRemote(options.uid);
+    if (
+      membership &&
+      membership.userId === options.uid &&
+      membership.role === "ADMIN"
+    ) {
+      const loaded = await loadManagerCompanyRemote(membership.companyId);
+      if (loaded && loaded.company.ownerId === options.uid) {
+        const published = await publishManagerCompany(loaded.company, options.uid);
+        if (published) {
+          if (options.email) saveOwnerEmail(options.email, published.id);
+          saveMembership(membership);
+          activateManager(published, options.uid);
+          return { role: "ADMIN" };
         }
-      } catch {
-        remoteId = null;
-      }
-      company = await cacheRemoteCompany(remoteId);
-    } else {
-      company = (await cacheRemoteCompany(company.id)) ?? company;
-    }
-
-    if (company && !companyMatchesManager(company, { ownerId, email: options.email })) {
-      company = null;
-    }
-
-    if (company) {
-      const claimed = await claimCompanyForManager(company, {
-        ownerId,
-        email: options.email,
-      });
-      activateCompany(claimed);
-      return;
-    }
-  }
-
-  if (options.role === "EMPLOYEE" && options.uid) {
-    let membership = getMembership(options.uid);
-    if (!membership) {
-      membership = await loadMembershipRemote(options.uid);
-      if (membership) saveMembership(membership);
-    }
-    if (membership) {
-      const company = await cacheRemoteCompany(membership.companyId);
-      if (company) {
-        activateCompany(ensureJoinCode(company), membership.employeeId);
-        return;
       }
     }
-    stopWatch();
-    applyCompany(null);
-    return;
+
+    if (
+      membership &&
+      membership.userId === options.uid &&
+      membership.role === "EMPLOYEE"
+    ) {
+      const remote = await loadEmployeeCompanyRemote(
+        membership.companyId,
+        membership.employeeId,
+      );
+      const company =
+        remote ??
+        ({
+          id: membership.companyId,
+          ownerId: "",
+          joinCode: "",
+          companyName: "Your team",
+          managerName: "",
+          email: "",
+          employeeCount: 1,
+          shiftTemplates: [],
+          employees: [],
+          shifts: [],
+          signups: [],
+          hours: [],
+          setupCompletedAt: new Date().toISOString(),
+        } satisfies Company);
+      activateEmployee(company, options.uid, membership.employeeId);
+      return { role: "EMPLOYEE" };
+    }
+
+    if (!membership && options.role !== "EMPLOYEE") {
+      let remoteId = await loadCompanyIdForOwnerRemote(options.uid);
+      if (!remoteId) remoteId = await loadCompanyIdForEmailRemote(options.email);
+      if (remoteId) {
+        const loaded = await loadManagerCompanyRemote(remoteId);
+        if (loaded && loaded.company.ownerId === options.uid) {
+          const published = await publishManagerCompany(loaded.company, options.uid);
+          if (published) {
+            if (options.email) saveOwnerEmail(options.email, published.id);
+            saveMembership({
+              userId: options.uid,
+              companyId: published.id,
+              employeeId: `${published.id}_${options.uid}`,
+              role: "ADMIN",
+            });
+            activateManager(published, options.uid);
+            return { role: "ADMIN" };
+          }
+        }
+      }
+    }
+
+    if (options.role === "EMPLOYEE") {
+      stopWatch();
+      setSession(null);
+      applyCompany(null);
+      return { role: null };
+    }
+
+    return { role: null };
   }
 
   if (!options.configured && ownerId && options.role !== "EMPLOYEE") {
-    const activated = activateWorkspaceForOwner(ownerId);
-    if (activated) return;
+    const activated = activateWorkspaceForOwner(ownerId, options.email);
+    if (activated) return { role: null };
+  }
+
+  if (options.role === "EMPLOYEE" && options.uid) {
+    const activated = activateWorkspaceForMember(options.uid);
+    if (activated) return { role: null };
   }
 
   activateDemoWorkspace();
+  return { role: null };
 }
 
 export async function joinCompanyWithCode(input: {
@@ -396,16 +516,52 @@ export async function joinCompanyWithCode(input: {
   email: string;
 }): Promise<{ ok: true; company: Company } | { ok: false; reason: string }> {
   const code = normalizeJoinCode(input.code);
-  if (code.length < 4) {
-    return { ok: false, reason: "Enter the 6-character code from your manager." };
+  if (code.length < 10 || code.length > 12) {
+    return { ok: false, reason: "Enter the 10-character code from your manager." };
   }
 
-  let companyId = getCompanyIdForJoinCode(code);
-  if (!companyId) {
-    companyId = await loadCompanyIdForJoinCodeRemote(code);
+  if (canUseFirestore()) {
+    try {
+      const joined = await joinCompanyRemote(input);
+      const remote = await loadEmployeeCompanyRemote(joined.companyId, joined.employeeId);
+      const company: Company = remote ?? {
+        id: joined.companyId,
+        ownerId: "",
+        joinCode: "",
+        companyName: "Your team",
+        managerName: "",
+        email: "",
+        employeeCount: 1,
+        shiftTemplates: [],
+        employees: [
+          {
+            id: joined.employeeId,
+            name: input.name.trim() || "Employee",
+            email: input.email.trim(),
+            role: "EMPLOYEE",
+            companyId: joined.companyId,
+            authUid: input.userId,
+            createdAt: new Date().toISOString(),
+          },
+        ],
+        shifts: [],
+        signups: [],
+        hours: [],
+        setupCompletedAt: new Date().toISOString(),
+      };
+      activateEmployee(company, input.userId, joined.employeeId);
+      return { ok: true, company: getActiveCompany() ?? company };
+    } catch (error) {
+      if (error instanceof JoinFailed) return { ok: false, reason: error.message };
+      return {
+        ok: false,
+        reason: "Could not join right now. Check your connection and try again.",
+      };
+    }
   }
 
-  const company = companyId ? await cacheRemoteCompany(companyId) : null;
+  const companyId = getCompanyIdForJoinCode(code);
+  const company = companyId ? getCompanyById(companyId) : null;
   if (!company) {
     return {
       ok: false,
@@ -419,14 +575,13 @@ export async function joinCompanyWithCode(input: {
     name: input.name,
     email: input.email,
   });
-  const saved = await persistCompany(attached.company);
-  const membership: CompanyMembership = {
+  const saved = saveCompanyLocal(attached.company);
+  saveMembership({
     userId: input.userId,
     companyId: saved.id,
     employeeId: attached.employee.id,
     role: "EMPLOYEE",
-  };
-  await persistMembership(membership);
-  activateCompany(saved, attached.employee.id);
-  return { ok: true, company: saved };
+  });
+  activateEmployee(saved, input.userId, attached.employee.id);
+  return { ok: true, company: getActiveCompany() ?? saved };
 }

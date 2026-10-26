@@ -11,10 +11,17 @@ export type AdvisorFile = {
   mimeType: string;
 };
 
+export type AdvisorOwner = {
+  uid: string;
+  companyId: string;
+};
+
 export type AdvisorJob = AdvisorJobPublic & {
   infiniTaskId: string;
   connId: string;
   file: AdvisorFile;
+  ownerUid: string;
+  companyId: string;
 };
 
 const jobs = new Map<string, AdvisorJob>();
@@ -59,7 +66,7 @@ export function toPublicJob(job: AdvisorJob): AdvisorJobPublic {
   };
 }
 
-export function createAdvisorJob(file: AdvisorFile): AdvisorJob {
+export function createAdvisorJob(file: AdvisorFile, owner: AdvisorOwner): AdvisorJob {
   const job: AdvisorJob = {
     id: randomUUID(),
     infiniTaskId: randomUUID(),
@@ -69,6 +76,8 @@ export function createAdvisorJob(file: AdvisorFile): AdvisorJob {
     filename: file.filename,
     createdAt: new Date().toISOString(),
     file,
+    ownerUid: owner.uid,
+    companyId: owner.companyId,
     localFindings: null,
     analysis: null,
     artifacts: [],
@@ -95,6 +104,12 @@ export function beginAdvisorJob(
 
 export function getAdvisorJob(id: string): AdvisorJob | null {
   return jobs.get(id) ?? null;
+}
+
+export function getAdvisorJobForOwner(id: string, uid: string): AdvisorJob | null {
+  const job = jobs.get(id) ?? null;
+  if (!job || job.ownerUid !== uid) return null;
+  return job;
 }
 
 export function startJobRun(id: string, progress: string): AdvisorJob | null {
