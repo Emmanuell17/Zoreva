@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { ShiftActionNotice } from "@/components/employee/shift-action-notice";
 import { PageHeader } from "@/components/layout/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -16,6 +17,7 @@ import { useCompany } from "@/hooks/use-company";
 import { useCurrentEmployeeId } from "@/hooks/use-current-employee";
 import { useInitialLoading } from "@/hooks/use-initial-loading";
 import { useSchedule } from "@/hooks/use-schedule";
+import { useShiftCommand } from "@/hooks/use-shift-command";
 import { confirmShift, submitHours } from "@/lib/services/schedule";
 import {
   hoursForSignup,
@@ -33,6 +35,7 @@ export function EmployeeDashboard() {
   const company = useCompany();
   const employeeId = useCurrentEmployeeId();
   const { shifts, signups, hours } = useSchedule();
+  const { pending, error, success, canRetry, run, retry } = useShiftCommand();
 
   const mine = signups.filter((signup) => signup.employeeId === employeeId);
   const myUpcoming = mine
@@ -70,6 +73,12 @@ export function EmployeeDashboard() {
             ? `${company.companyName} — one thing at a time.`
             : "One thing at a time."
         }
+      />
+
+      <ShiftActionNotice
+        error={error}
+        success={success}
+        onRetry={canRetry ? retry : null}
       />
 
       <div className="grid gap-5">
@@ -125,7 +134,16 @@ export function EmployeeDashboard() {
               <Button
                 size="lg"
                 className="w-full"
-                onClick={() => confirmShift(confirmNow.shift.id)}
+                loading={pending === `confirm:${confirmNow.shift.id}`}
+                disabled={pending !== null}
+                onClick={() => {
+                  const shiftId = confirmNow.shift.id;
+                  void run(`confirm:${shiftId}`, async () => {
+                    const result = await confirmShift(shiftId);
+                    if (!result.ok) return result;
+                    return { ok: true, message: "You're confirmed for this shift." };
+                  });
+                }}
               >
                 I&apos;m coming
               </Button>

@@ -174,6 +174,15 @@ export function getCurrentEmployeeId(): string {
   return currentEmployeeId;
 }
 
+export function getBookingSession(): {
+  uid: string;
+  role: Role;
+  companyId: string;
+  employeeId: string;
+} | null {
+  return session ? { ...session } : null;
+}
+
 export function getActiveEmployees(): User[] {
   if (activeCompany) {
     return activeCompany.employees.map((employee) => ({ ...employee }));

@@ -9,6 +9,7 @@ import {
 } from "@firebase/rules-unit-testing";
 import {
   collection,
+  deleteDoc,
   doc,
   getDoc,
   getDocs,
@@ -23,6 +24,50 @@ const LATER = Date.now() + 7 * 24 * 60 * 60 * 1000;
 const EARLIER = Date.now() - 60_000;
 
 let testEnv: RulesTestEnvironment;
+
+function openingData(
+  slots = 2,
+  taken = 0,
+  endAt = LATER,
+  startTime = "09:00",
+  endTime = "17:00",
+  date = "2026-10-27",
+) {
+  return {
+    slots,
+    taken,
+    date,
+    startTime,
+    endTime,
+    endAt,
+    heldSignupId: "",
+  };
+}
+
+function claimData(
+  employeeId: string,
+  bookings: Array<{ shiftId: string; startTime?: string; endTime?: string; date?: string }>,
+) {
+  return {
+    employeeId,
+    bookings: bookings.map((booking) => ({
+      shiftId: booking.shiftId,
+      date: booking.date ?? "2026-10-27",
+      startTime: booking.startTime ?? "09:00",
+      endTime: booking.endTime ?? "17:00",
+    })),
+  };
+}
+
+function selectedSignup(employeeId: string, shiftId: string) {
+  return {
+    shiftId,
+    employeeId,
+    status: "SELECTED" as const,
+    selectedAt: "2026-10-26T00:00:00.000Z",
+    confirmedAt: null,
+  };
+}
 
 function companyData(ownerId: string, id = "co1", joinCode = "ABCDE23456") {
   return {
@@ -63,6 +108,7 @@ beforeEach(async () => {
       shiftTemplates: [],
       shifts: [{ id: "shift1" }],
     });
+    await setDoc(doc(db, "companies/co1/openings/shift1"), openingData());
     await setDoc(doc(db, "companies/co2/published/schedule"), {
       companyName: "South Cafe",
       shiftTemplates: [],
@@ -197,15 +243,14 @@ test("employees can write only their own signups and hours", async () => {
       confirmedAt: null,
     }),
   );
-  await assertSucceeds(
-    setDoc(doc(db, "companies/co1/signups/mine"), {
-      shiftId: "shift1",
-      employeeId: "co1_emp1",
-      status: "SELECTED",
-      selectedAt: "2026-10-26T00:00:00.000Z",
-      confirmedAt: null,
-    }),
-  );
+  const book = writeBatch(db);
+  book.update(doc(db, "companies/co1/openings/shift1"), {
+    taken: 1,
+    heldSignupId: "co1_emp1~shift1",
+  });
+  book.set(doc(db, "companies/co1/signups/co1_emp1~shift1"), selectedSignup("co1_emp1", "shift1"));
+  book.set(doc(db, "companies/co1/claims/co1_emp1"), claimData("co1_emp1", [{ shiftId: "shift1" }]));
+  await assertSucceeds(book.commit());
   await assertFails(getDoc(doc(db, "companies/co1/hours/other")));
   await assertSucceeds(getDoc(doc(db, "companies/co1/hours/own")));
   const ownHours = await getDocs(
@@ -329,4 +374,189 @@ test("a new owner can create only their own company", async () => {
     expiresAt: LATER,
   });
   await assertSucceeds(created.commit());
+});
+
+test("shift booking rules keep the last seat, block duplicates, and require a matched cancel", async () => {
+  const employee = testEnv.authenticatedContext("emp1", { email: "sam@cafe.test" }).firestore();
+  await assertFails(getDoc(doc(employee, "companies/co2/openings/shift1")));
+  await assertFails(
+    setDoc(doc(employee, "companies/co1/signups/co1_emp1~shift1"), selectedSignup("co1_emp1", "shift1")),
+  );
+  await assertFails(
+    updateDoc(doc(employee, "companies/co1/openings/shift1"), {
+      taken: 1,
+      heldSignupId: "co1_emp1~shift1",
+    }),
+  );
+  await assertFails(
+    setDoc(doc(employee, "companies/co1/signups/signup_other"), selectedSignup("co1_emp1", "shift1")),
+  );
+
+  const book = writeBatch(employee);
+  book.update(doc(employee, "companies/co1/openings/shift1"), {
+    taken: 1,
+    heldSignupId: "co1_emp1~shift1",
+  });
+  book.set(
+    doc(employee, "companies/co1/signups/co1_emp1~shift1"),
+    selectedSignup("co1_emp1", "shift1"),
+  );
+  book.set(
+    doc(employee, "companies/co1/claims/co1_emp1"),
+    claimData("co1_emp1", [{ shiftId: "shift1" }]),
+  );
+  await assertSucceeds(book.commit());
+
+  const duplicate = writeBatch(employee);
+  duplicate.update(doc(employee, "companies/co1/openings/shift1"), {
+    taken: 2,
+    heldSignupId: "co1_emp1~shift1",
+  });
+  duplicate.set(
+    doc(employee, "companies/co1/signups/co1_emp1~shift1"),
+    selectedSignup("co1_emp1", "shift1"),
+  );
+  await assertFails(duplicate.commit());
+
+  await assertSucceeds(
+    updateDoc(doc(employee, "companies/co1/signups/co1_emp1~shift1"), {
+      status: "CONFIRMED",
+      confirmedAt: "2026-10-26T01:00:00.000Z",
+    }),
+  );
+
+  const owner = testEnv.authenticatedContext("owner1", { email: "ada@cafe.test" }).firestore();
+  await assertFails(
+    updateDoc(doc(owner, "companies/co1/openings/shift1"), { taken: 0, heldSignupId: "" }),
+  );
+  await assertSucceeds(
+    updateDoc(doc(owner, "companies/co1/openings/shift1"), { endTime: "18:00" }),
+  );
+  await assertFails(
+    updateDoc(doc(employee, "companies/co1/openings/shift1"), { endTime: "19:00" }),
+  );
+
+  const cancelWithoutSeat = deleteDoc(doc(employee, "companies/co1/signups/co1_emp1~shift1"));
+  await assertFails(cancelWithoutSeat);
+
+  const cancel = writeBatch(employee);
+  cancel.update(doc(employee, "companies/co1/openings/shift1"), {
+    taken: 0,
+    heldSignupId: "co1_emp1~shift1",
+  });
+  cancel.delete(doc(employee, "companies/co1/signups/co1_emp1~shift1"));
+  cancel.set(doc(employee, "companies/co1/claims/co1_emp1"), claimData("co1_emp1", []));
+  await assertSucceeds(cancel.commit());
+
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    const db = context.firestore();
+    await setDoc(doc(db, "companies/co1/openings/last"), openingData(1, 0));
+    await setDoc(doc(db, "companies/co1/openings/past"), openingData(1, 0, EARLIER));
+    await setDoc(doc(db, "companies/co1/openings/am"), openingData(2, 0, LATER, "09:00", "13:00"));
+    await setDoc(doc(db, "companies/co1/openings/pm"), openingData(2, 0, LATER, "12:00", "16:00"));
+    await setDoc(
+      doc(db, "companies/co1/openings/nextday"),
+      openingData(2, 0, LATER, "09:00", "12:00", "2026-10-28"),
+    );
+    await setDoc(doc(db, "companies/co2/openings/shift1"), openingData(1, 0));
+    await setDoc(doc(db, "memberships/emp2"), {
+      userId: "emp2",
+      companyId: "co1",
+      employeeId: "co1_emp2",
+      role: "EMPLOYEE",
+    });
+  });
+
+  const past = writeBatch(employee);
+  past.update(doc(employee, "companies/co1/openings/past"), {
+    taken: 1,
+    heldSignupId: "co1_emp1~past",
+  });
+  past.set(doc(employee, "companies/co1/signups/co1_emp1~past"), selectedSignup("co1_emp1", "past"));
+  await assertFails(past.commit());
+
+  const otherCompany = writeBatch(employee);
+  otherCompany.update(doc(employee, "companies/co2/openings/shift1"), {
+    taken: 1,
+    heldSignupId: "co1_emp1~shift1",
+  });
+  otherCompany.set(
+    doc(employee, "companies/co2/signups/co1_emp1~shift1"),
+    selectedSignup("co1_emp1", "shift1"),
+  );
+  await assertFails(otherCompany.commit());
+
+  const first = writeBatch(employee);
+  first.update(doc(employee, "companies/co1/openings/last"), {
+    taken: 1,
+    heldSignupId: "co1_emp1~last",
+  });
+  first.set(doc(employee, "companies/co1/signups/co1_emp1~last"), selectedSignup("co1_emp1", "last"));
+  first.set(doc(employee, "companies/co1/claims/co1_emp1"), claimData("co1_emp1", [{ shiftId: "last" }]));
+  await assertSucceeds(first.commit());
+
+  const other = testEnv.authenticatedContext("emp2", { email: "jo@cafe.test" }).firestore();
+  const stale = writeBatch(other);
+  stale.update(doc(other, "companies/co1/openings/last"), {
+    taken: 1,
+    heldSignupId: "co1_emp2~last",
+  });
+  stale.set(doc(other, "companies/co1/signups/co1_emp2~last"), selectedSignup("co1_emp2", "last"));
+  await assertFails(stale.commit());
+
+  const overflow = writeBatch(other);
+  overflow.update(doc(other, "companies/co1/openings/last"), {
+    taken: 2,
+    heldSignupId: "co1_emp2~last",
+  });
+  overflow.set(doc(other, "companies/co1/signups/co1_emp2~last"), selectedSignup("co1_emp2", "last"));
+  await assertFails(overflow.commit());
+
+  await assertSucceeds(setDoc(doc(owner, "companies/co1/openings/fresh"), openingData()));
+  await assertFails(setDoc(doc(employee, "companies/co1/openings/stolen"), openingData()));
+
+  const morning = writeBatch(other);
+  morning.update(doc(other, "companies/co1/openings/am"), {
+    taken: 1,
+    heldSignupId: "co1_emp2~am",
+  });
+  morning.set(doc(other, "companies/co1/signups/co1_emp2~am"), selectedSignup("co1_emp2", "am"));
+  morning.set(
+    doc(other, "companies/co1/claims/co1_emp2"),
+    claimData("co1_emp2", [{ shiftId: "am", startTime: "09:00", endTime: "13:00" }]),
+  );
+  await assertSucceeds(morning.commit());
+
+  const overlap = writeBatch(other);
+  overlap.update(doc(other, "companies/co1/openings/pm"), {
+    taken: 1,
+    heldSignupId: "co1_emp2~pm",
+  });
+  overlap.set(doc(other, "companies/co1/signups/co1_emp2~pm"), selectedSignup("co1_emp2", "pm"));
+  overlap.set(
+    doc(other, "companies/co1/claims/co1_emp2"),
+    claimData("co1_emp2", [
+      { shiftId: "am", startTime: "09:00", endTime: "13:00" },
+      { shiftId: "pm", startTime: "12:00", endTime: "16:00" },
+    ]),
+  );
+  await assertFails(overlap.commit());
+
+  const later = writeBatch(other);
+  later.update(doc(other, "companies/co1/openings/nextday"), {
+    taken: 1,
+    heldSignupId: "co1_emp2~nextday",
+  });
+  later.set(
+    doc(other, "companies/co1/signups/co1_emp2~nextday"),
+    selectedSignup("co1_emp2", "nextday"),
+  );
+  later.set(
+    doc(other, "companies/co1/claims/co1_emp2"),
+    claimData("co1_emp2", [
+      { shiftId: "am", startTime: "09:00", endTime: "13:00" },
+      { shiftId: "nextday", startTime: "09:00", endTime: "12:00", date: "2026-10-28" },
+    ]),
+  );
+  await assertSucceeds(later.commit());
 });

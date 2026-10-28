@@ -50,6 +50,212 @@ service cloud.firestore {
       return isManager(companyId) || isEmployee(companyId);
     }
 
+    function openingPath(companyId, shiftId) {
+      return /databases/$(database)/documents/companies/$(companyId)/openings/$(shiftId);
+    }
+
+    function signupPath(companyId, signupId) {
+      return /databases/$(database)/documents/companies/$(companyId)/signups/$(signupId);
+    }
+
+    function validOpening(data) {
+      return data.keys().hasOnly([
+          'slots', 'taken', 'date', 'startTime', 'endTime', 'endAt', 'heldSignupId'
+        ])
+        && data.slots is int
+        && data.slots >= 1
+        && data.slots <= 500
+        && data.taken is int
+        && data.taken >= 0
+        && data.taken <= data.slots
+        && data.date is string
+        && data.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && data.startTime is string
+        && data.startTime.size() >= 4
+        && data.startTime.size() <= 5
+        && data.endTime is string
+        && data.endTime.size() >= 4
+        && data.endTime.size() <= 5
+        && data.endAt is int
+        && data.endAt > 0
+        && data.heldSignupId is string
+        && data.heldSignupId.size() < 400;
+    }
+
+    function claimsSeat(companyId, shiftId) {
+      return isEmployee(companyId)
+        && request.resource.data.taken == resource.data.taken + 1
+        && request.resource.data.taken <= resource.data.slots
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['taken', 'heldSignupId'])
+        && request.resource.data.heldSignupId == memberData().employeeId + '~' + shiftId
+        && existsAfter(signupPath(companyId, request.resource.data.heldSignupId))
+        && getAfter(signupPath(companyId, request.resource.data.heldSignupId)).data.employeeId == memberData().employeeId
+        && getAfter(signupPath(companyId, request.resource.data.heldSignupId)).data.shiftId == shiftId
+        && getAfter(signupPath(companyId, request.resource.data.heldSignupId)).data.status == 'SELECTED'
+        && resource.data.endAt > request.time.toMillis();
+    }
+
+    function releasesSeat(companyId, shiftId) {
+      return isEmployee(companyId)
+        && request.resource.data.taken == resource.data.taken - 1
+        && request.resource.data.taken >= 0
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['taken', 'heldSignupId'])
+        && request.resource.data.heldSignupId.size() > 0
+        && exists(signupPath(companyId, request.resource.data.heldSignupId))
+        && !existsAfter(signupPath(companyId, request.resource.data.heldSignupId))
+        && get(signupPath(companyId, request.resource.data.heldSignupId)).data.employeeId == memberData().employeeId
+        && get(signupPath(companyId, request.resource.data.heldSignupId)).data.shiftId == shiftId;
+    }
+
+    function claimPath(companyId, employeeId) {
+      return /databases/$(database)/documents/companies/$(companyId)/claims/$(employeeId);
+    }
+
+    function validBooking(booking) {
+      return booking.keys().hasOnly(['shiftId', 'date', 'startTime', 'endTime'])
+        && booking.shiftId is string
+        && booking.shiftId.size() > 0
+        && booking.shiftId.size() < 120
+        && booking.date is string
+        && booking.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && booking.startTime is string
+        && booking.startTime.size() >= 4
+        && booking.startTime.size() <= 5
+        && booking.endTime is string
+        && booking.endTime.size() >= 4
+        && booking.endTime.size() <= 5;
+    }
+
+    function matchesOpening(booking, opening) {
+      return booking.date == opening.date
+        && booking.startTime == opening.startTime
+        && booking.endTime == opening.endTime;
+    }
+
+    function sameBooking(left, right) {
+      return left.shiftId == right.shiftId
+        && left.date == right.date
+        && left.startTime == right.startTime
+        && left.endTime == right.endTime;
+    }
+
+    function timesCross(left, right) {
+      return left.date == right.date
+        && left.shiftId != right.shiftId
+        && left.startTime < right.endTime
+        && right.startTime < left.endTime;
+    }
+
+    function hasShift(bookings, shiftId) {
+      return (bookings.size() > 0 && bookings[0].shiftId == shiftId)
+        || (bookings.size() > 1 && bookings[1].shiftId == shiftId)
+        || (bookings.size() > 2 && bookings[2].shiftId == shiftId)
+        || (bookings.size() > 3 && bookings[3].shiftId == shiftId)
+        || (bookings.size() > 4 && bookings[4].shiftId == shiftId)
+        || (bookings.size() > 5 && bookings[5].shiftId == shiftId)
+        || (bookings.size() > 6 && bookings[6].shiftId == shiftId)
+        || (bookings.size() > 7 && bookings[7].shiftId == shiftId)
+        || (bookings.size() > 8 && bookings[8].shiftId == shiftId)
+        || (bookings.size() > 9 && bookings[9].shiftId == shiftId)
+        || (bookings.size() > 10 && bookings[10].shiftId == shiftId)
+        || (bookings.size() > 11 && bookings[11].shiftId == shiftId);
+    }
+
+    function hasBooking(bookings, booking) {
+      return (bookings.size() > 0 && sameBooking(bookings[0], booking))
+        || (bookings.size() > 1 && sameBooking(bookings[1], booking))
+        || (bookings.size() > 2 && sameBooking(bookings[2], booking))
+        || (bookings.size() > 3 && sameBooking(bookings[3], booking))
+        || (bookings.size() > 4 && sameBooking(bookings[4], booking))
+        || (bookings.size() > 5 && sameBooking(bookings[5], booking))
+        || (bookings.size() > 6 && sameBooking(bookings[6], booking))
+        || (bookings.size() > 7 && sameBooking(bookings[7], booking))
+        || (bookings.size() > 8 && sameBooking(bookings[8], booking))
+        || (bookings.size() > 9 && sameBooking(bookings[9], booking))
+        || (bookings.size() > 10 && sameBooking(bookings[10], booking))
+        || (bookings.size() > 11 && sameBooking(bookings[11], booking));
+    }
+
+    function prefixKept(before, after) {
+      return (before.size() < 1 || sameBooking(before[0], after[0]))
+        && (before.size() < 2 || sameBooking(before[1], after[1]))
+        && (before.size() < 3 || sameBooking(before[2], after[2]))
+        && (before.size() < 4 || sameBooking(before[3], after[3]))
+        && (before.size() < 5 || sameBooking(before[4], after[4]))
+        && (before.size() < 6 || sameBooking(before[5], after[5]))
+        && (before.size() < 7 || sameBooking(before[6], after[6]))
+        && (before.size() < 8 || sameBooking(before[7], after[7]))
+        && (before.size() < 9 || sameBooking(before[8], after[8]))
+        && (before.size() < 10 || sameBooking(before[9], after[9]))
+        && (before.size() < 11 || sameBooking(before[10], after[10]))
+        && (before.size() < 12 || sameBooking(before[11], after[11]));
+    }
+
+    function overlapsHeld(before, added) {
+      return (before.size() > 0 && timesCross(before[0], added))
+        || (before.size() > 1 && timesCross(before[1], added))
+        || (before.size() > 2 && timesCross(before[2], added))
+        || (before.size() > 3 && timesCross(before[3], added))
+        || (before.size() > 4 && timesCross(before[4], added))
+        || (before.size() > 5 && timesCross(before[5], added))
+        || (before.size() > 6 && timesCross(before[6], added))
+        || (before.size() > 7 && timesCross(before[7], added))
+        || (before.size() > 8 && timesCross(before[8], added))
+        || (before.size() > 9 && timesCross(before[9], added))
+        || (before.size() > 10 && timesCross(before[10], added))
+        || (before.size() > 11 && timesCross(before[11], added));
+    }
+
+    function othersKept(before, after, shiftId) {
+      return (before.size() < 1 || before[0].shiftId == shiftId || hasBooking(after, before[0]))
+        && (before.size() < 2 || before[1].shiftId == shiftId || hasBooking(after, before[1]))
+        && (before.size() < 3 || before[2].shiftId == shiftId || hasBooking(after, before[2]))
+        && (before.size() < 4 || before[3].shiftId == shiftId || hasBooking(after, before[3]))
+        && (before.size() < 5 || before[4].shiftId == shiftId || hasBooking(after, before[4]))
+        && (before.size() < 6 || before[5].shiftId == shiftId || hasBooking(after, before[5]))
+        && (before.size() < 7 || before[6].shiftId == shiftId || hasBooking(after, before[6]))
+        && (before.size() < 8 || before[7].shiftId == shiftId || hasBooking(after, before[7]))
+        && (before.size() < 9 || before[8].shiftId == shiftId || hasBooking(after, before[8]))
+        && (before.size() < 10 || before[9].shiftId == shiftId || hasBooking(after, before[9]))
+        && (before.size() < 11 || before[10].shiftId == shiftId || hasBooking(after, before[10]))
+        && (before.size() < 12 || before[11].shiftId == shiftId || hasBooking(after, before[11]));
+    }
+
+    function claimReleased(before, after, shiftId) {
+      return before.keys().hasOnly(['employeeId', 'bookings'])
+        && after.keys().hasOnly(['employeeId', 'bookings'])
+        && before.bookings is list
+        && after.bookings is list
+        && before.employeeId == after.employeeId
+        && before.bookings.size() == after.bookings.size() + 1
+        && hasShift(before.bookings, shiftId)
+        && !hasShift(after.bookings, shiftId)
+        && othersKept(before.bookings, after.bookings, shiftId);
+    }
+
+    function releasedAt(companyId, employeeId, index) {
+      return claimReleased(resource.data, request.resource.data, resource.data.bookings[index].shiftId)
+        && !existsAfter(signupPath(companyId, employeeId + '~' + resource.data.bookings[index].shiftId));
+    }
+
+    function releasesClaim(companyId, employeeId) {
+      return request.resource.data.bookings.size() + 1 == resource.data.bookings.size()
+        && (
+          (resource.data.bookings.size() > 0 && releasedAt(companyId, employeeId, 0))
+          || (resource.data.bookings.size() > 1 && releasedAt(companyId, employeeId, 1))
+          || (resource.data.bookings.size() > 2 && releasedAt(companyId, employeeId, 2))
+          || (resource.data.bookings.size() > 3 && releasedAt(companyId, employeeId, 3))
+          || (resource.data.bookings.size() > 4 && releasedAt(companyId, employeeId, 4))
+          || (resource.data.bookings.size() > 5 && releasedAt(companyId, employeeId, 5))
+          || (resource.data.bookings.size() > 6 && releasedAt(companyId, employeeId, 6))
+          || (resource.data.bookings.size() > 7 && releasedAt(companyId, employeeId, 7))
+          || (resource.data.bookings.size() > 8 && releasedAt(companyId, employeeId, 8))
+          || (resource.data.bookings.size() > 9 && releasedAt(companyId, employeeId, 9))
+          || (resource.data.bookings.size() > 10 && releasedAt(companyId, employeeId, 10))
+          || (resource.data.bookings.size() > 11 && releasedAt(companyId, employeeId, 11))
+        );
+    }
+
     function validCompany(data) {
       return data.keys().hasOnly([
           'id',
@@ -204,10 +410,79 @@ service cloud.firestore {
         allow delete: if false;
       }
 
+      match /openings/{shiftId} {
+        allow read: if isMember(companyId);
+
+        allow create: if isManager(companyId)
+          && validOpening(request.resource.data)
+          && request.resource.data.heldSignupId == '';
+
+        allow update: if validOpening(request.resource.data)
+          && (
+            (
+              isManager(companyId)
+              && request.resource.data.taken == resource.data.taken
+              && request.resource.data.heldSignupId == resource.data.heldSignupId
+            )
+            || claimsSeat(companyId, shiftId)
+            || releasesSeat(companyId, shiftId)
+          );
+
+        allow delete: if false;
+      }
+
+      match /claims/{employeeId} {
+        allow get: if isManager(companyId)
+          || (isEmployee(companyId) && employeeId == memberData().employeeId);
+        allow list: if isManager(companyId);
+
+        allow create: if isEmployee(companyId)
+          && employeeId == memberData().employeeId
+          && request.resource.data.keys().hasOnly(['employeeId', 'bookings'])
+          && request.resource.data.employeeId == employeeId
+          && request.resource.data.bookings is list
+          && request.resource.data.bookings.size() == 1
+          && validBooking(request.resource.data.bookings[0])
+          && matchesOpening(
+            request.resource.data.bookings[0],
+            get(openingPath(companyId, request.resource.data.bookings[0].shiftId)).data
+          )
+          && existsAfter(signupPath(companyId, employeeId + '~' + request.resource.data.bookings[0].shiftId));
+
+        allow update: if isEmployee(companyId)
+          && employeeId == memberData().employeeId
+          && request.resource.data.keys().hasOnly(['employeeId', 'bookings'])
+          && request.resource.data.employeeId == employeeId
+          && resource.data.employeeId == employeeId
+          && resource.data.keys().hasOnly(['employeeId', 'bookings'])
+          && request.resource.data.bookings is list
+          && resource.data.bookings is list
+          && (
+            (
+              request.resource.data.bookings.size() == resource.data.bookings.size() + 1
+              && request.resource.data.bookings.size() <= 12
+              && prefixKept(resource.data.bookings, request.resource.data.bookings)
+              && validBooking(request.resource.data.bookings[resource.data.bookings.size()])
+              && !hasShift(resource.data.bookings, request.resource.data.bookings[resource.data.bookings.size()].shiftId)
+              && !overlapsHeld(resource.data.bookings, request.resource.data.bookings[resource.data.bookings.size()])
+              && matchesOpening(
+                request.resource.data.bookings[resource.data.bookings.size()],
+                get(openingPath(companyId, request.resource.data.bookings[resource.data.bookings.size()].shiftId)).data
+              )
+              && existsAfter(signupPath(companyId, employeeId + '~' + request.resource.data.bookings[resource.data.bookings.size()].shiftId))
+            )
+            || releasesClaim(companyId, employeeId)
+          );
+
+        allow delete: if false;
+      }
+
       match /signups/{signupId} {
         allow read: if isMember(companyId);
 
         allow create: if isEmployee(companyId)
+          && signupId == request.resource.data.employeeId + '~' + request.resource.data.shiftId
+          && signupId.size() < 400
           && request.resource.data.keys().hasOnly([
             'shiftId', 'employeeId', 'status', 'selectedAt', 'confirmedAt'
           ])
@@ -218,7 +493,12 @@ service cloud.firestore {
           && request.resource.data.shiftId.size() < 120
           && request.resource.data.selectedAt is string
           && request.resource.data.selectedAt.size() < 40
-          && request.resource.data.confirmedAt == null;
+          && request.resource.data.confirmedAt == null
+          && exists(openingPath(companyId, request.resource.data.shiftId))
+          && get(openingPath(companyId, request.resource.data.shiftId)).data.endAt > request.time.toMillis()
+          && getAfter(openingPath(companyId, request.resource.data.shiftId)).data.taken == get(openingPath(companyId, request.resource.data.shiftId)).data.taken + 1
+          && getAfter(openingPath(companyId, request.resource.data.shiftId)).data.heldSignupId == signupId
+          && existsAfter(claimPath(companyId, request.resource.data.employeeId));
 
         allow update: if isEmployee(companyId)
           && resource.data.employeeId == memberData().employeeId
@@ -233,7 +513,18 @@ service cloud.firestore {
           && request.resource.data.confirmedAt is string;
 
         allow delete: if isEmployee(companyId)
-          && resource.data.employeeId == memberData().employeeId;
+          && resource.data.employeeId == memberData().employeeId
+          && exists(openingPath(companyId, resource.data.shiftId))
+          && getAfter(openingPath(companyId, resource.data.shiftId)).data.taken == get(openingPath(companyId, resource.data.shiftId)).data.taken - 1
+          && getAfter(openingPath(companyId, resource.data.shiftId)).data.heldSignupId == signupId
+          && (
+            signupId != resource.data.employeeId + '~' + resource.data.shiftId
+            || claimReleased(
+              get(claimPath(companyId, resource.data.employeeId)).data,
+              getAfter(claimPath(companyId, resource.data.employeeId)).data,
+              resource.data.shiftId
+            )
+          );
       }
 
       match /hours/{hoursId} {

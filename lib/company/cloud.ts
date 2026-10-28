@@ -6,6 +6,7 @@ import {
   getDocs,
   onSnapshot,
   query,
+  runTransaction,
   setDoc,
   where,
   writeBatch,
@@ -20,6 +21,19 @@ import {
   publishedSchedulePayload,
   rosterPayload,
 } from "@/lib/security/policy";
+import {
+  decideBooking,
+  decideCancellation,
+  decideConfirmation,
+  openingFromShift,
+  openingWrite,
+  readOpening,
+  signupDocumentId,
+  MAX_TRACKED_SHIFTS,
+  type BookedSignup,
+  type HeldShift,
+  type ShiftWriteResult,
+} from "@/lib/shifts/booking";
 import type {
   Company,
   CompanyMembership,
@@ -362,6 +376,7 @@ export async function createManagerWorkspaceRemote(
   });
   await batch.commit();
   await writeRoster(company);
+  await syncShiftOpeningsRemote(company.id, company.shifts, company.signups);
 }
 
 export async function ensureOwnerMembershipRemote(company: Company): Promise<void> {
@@ -407,6 +422,7 @@ export async function migrateManagerWorkspaceRemote(
       // A missing or already removed code should not block the new one.
     }
   }
+  await syncShiftOpeningsRemote(company.id, company.shifts, company.signups);
 }
 
 async function writeRoster(company: Company): Promise<void> {
@@ -441,6 +457,7 @@ export async function updatePublishedScheduleRemote(company: Company): Promise<v
     doc(getFirebaseFirestore(), "companies", company.id, "published", "schedule"),
     clone(publishedSchedulePayload(company)),
   );
+  await syncShiftOpeningsRemote(company.id, company.shifts, company.signups);
 }
 
 export class JoinFailed extends Error {
@@ -532,17 +549,353 @@ export async function joinCompanyRemote(input: {
   return { companyId, employeeId };
 }
 
-function signupPayload(signup: ShiftSignup, status: ShiftSignup["status"]): Record<string, unknown> {
+function remoteBookingError(error: unknown): { ok: false; reason: string } {
+  const code =
+    typeof error === "object" && error !== null && "code" in error
+      ? String((error as { code?: string }).code)
+      : "";
+  if (
+    code === "permission-denied" ||
+    code === "aborted" ||
+    code === "failed-precondition" ||
+    code === "already-exists"
+  ) {
+    return {
+      ok: false,
+      reason: "This shift changed while you were booking. Look at the latest spots and try again.",
+    };
+  }
   return {
+    ok: false,
+    reason: "Could not save the shift. Check your connection and try again.",
+  };
+}
+
+function asBookedSignup(id: string, data: Record<string, unknown>): BookedSignup {
+  const signup = signupFromDoc(id, data);
+  return {
+    id: signup.id,
     shiftId: signup.shiftId,
     employeeId: signup.employeeId,
-    status,
+    status: signup.status,
     selectedAt: stamp(signup.selectedAt),
-    confirmedAt:
-      status === "CONFIRMED"
-        ? stamp(signup.confirmedAt ?? new Date().toISOString())
-        : null,
+    confirmedAt: typeof signup.confirmedAt === "string" ? signup.confirmedAt : null,
   };
+}
+
+export async function syncShiftOpeningsRemote(
+  companyId: string,
+  shifts: Shift[],
+  signups: { shiftId: string }[] = [],
+): Promise<void> {
+  if (!canUseFirestore() || shifts.length === 0) return;
+  const db = getFirebaseFirestore();
+  try {
+    for (const shift of shifts) {
+      if (!/^\d{2}:\d{2}$/.test(shift.startTime) || !/^\d{2}:\d{2}$/.test(shift.endTime)) {
+        continue;
+      }
+      const ref = doc(db, "companies", companyId, "openings", shift.id);
+      const knownTaken = signups.filter((signup) => signup.shiftId === shift.id).length;
+      await runTransaction(db, async (transaction) => {
+        const snap = await transaction.get(ref);
+        if (!snap.exists()) {
+          transaction.set(ref, openingWrite(openingFromShift(shift, knownTaken), ""));
+          return;
+        }
+        const current = readOpening(shift.id, asRecord(snap.data()));
+        const opening = openingFromShift(shift, current?.taken ?? 0);
+        transaction.update(ref, {
+          slots: opening.slots,
+          date: opening.date,
+          startTime: opening.startTime,
+          endTime: opening.endTime,
+          endAt: opening.endAt,
+        });
+      });
+    }
+  } catch {
+    // A counter sync can be retried on the next schedule save. It must not undo company setup.
+  }
+}
+
+function readClaimBookings(data: Record<string, unknown> | null): HeldShift[] | null {
+  if (!data) return [];
+  if (!Array.isArray(data.bookings)) return null;
+  const bookings: HeldShift[] = [];
+  for (const item of data.bookings) {
+    const record = asRecord(item);
+    const shiftId = asString(record.shiftId);
+    const date = asString(record.date);
+    const startTime = asString(record.startTime);
+    const endTime = asString(record.endTime);
+    if (!shiftId || !date || !startTime || !endTime) return null;
+    bookings.push({ shiftId, date, startTime, endTime });
+  }
+  return bookings;
+}
+
+function ownsSignup(data: Record<string, unknown>, employeeId: string, shiftId: string): boolean {
+  return asString(data.employeeId) === employeeId && asString(data.shiftId) === shiftId;
+}
+
+export async function bookShiftRemote(
+  companyId: string,
+  employeeId: string,
+  shiftId: string,
+  knownSignupIds: string[] = [],
+): Promise<ShiftWriteResult> {
+  if (!canUseFirestore()) {
+    return remoteBookingError(new Error("offline"));
+  }
+  const signupId = signupDocumentId(employeeId, shiftId);
+  if (!signupId) {
+    return { ok: false, reason: "That shift is no longer available." };
+  }
+  if (knownSignupIds.length > MAX_TRACKED_SHIFTS) {
+    return {
+      ok: false,
+      reason: "You have too many saved shifts to book another right now.",
+    };
+  }
+  const db = getFirebaseFirestore();
+  try {
+    return await runTransaction(db, async (transaction) => {
+      const openingRef = doc(db, "companies", companyId, "openings", shiftId);
+      const signupRef = doc(db, "companies", companyId, "signups", signupId);
+      const claimRef = doc(db, "companies", companyId, "claims", employeeId);
+      const extraIds = [...new Set(knownSignupIds)].filter((id) => id && id !== signupId);
+      const openingSnap = await transaction.get(openingRef);
+      const signupSnap = await transaction.get(signupRef);
+      const claimSnap = await transaction.get(claimRef);
+      const extraSnaps = [];
+      for (const id of extraIds) {
+        extraSnaps.push(await transaction.get(doc(db, "companies", companyId, "signups", id)));
+      }
+      if (signupSnap.exists()) {
+        return {
+          ok: true as const,
+          alreadyBooked: true,
+          signup: asBookedSignup(signupSnap.id, asRecord(signupSnap.data())),
+        };
+      }
+      for (const extra of extraSnaps) {
+        if (!extra.exists()) continue;
+        const data = asRecord(extra.data());
+        if (!ownsSignup(data, employeeId, shiftId)) continue;
+        return {
+          ok: true as const,
+          alreadyBooked: true,
+          signup: asBookedSignup(extra.id, data),
+        };
+      }
+
+      const claimed = readClaimBookings(claimSnap.exists() ? asRecord(claimSnap.data()) : null);
+      if (!claimed || claimed.some((booking) => booking.shiftId === shiftId)) {
+        return {
+          ok: false as const,
+          reason: "Could not check your other shifts. Try again.",
+        };
+      }
+      const held: HeldShift[] = [...claimed];
+      for (const extra of extraSnaps) {
+        if (!extra.exists()) continue;
+        const data = asRecord(extra.data());
+        if (asString(data.employeeId) !== employeeId) continue;
+        const otherShiftId = asString(data.shiftId);
+        if (!otherShiftId || otherShiftId === shiftId || held.some((booking) => booking.shiftId === otherShiftId)) {
+          continue;
+        }
+        const otherSnap = await transaction.get(
+          doc(db, "companies", companyId, "openings", otherShiftId),
+        );
+        const other = readOpening(otherShiftId, otherSnap.exists() ? asRecord(otherSnap.data()) : null);
+        if (!other) {
+          return { ok: false as const, reason: "Could not check your other shifts. Try again." };
+        }
+        held.push({
+          shiftId: other.shiftId,
+          date: other.date,
+          startTime: other.startTime,
+          endTime: other.endTime,
+        });
+      }
+
+      const opening = readOpening(shiftId, openingSnap.exists() ? asRecord(openingSnap.data()) : null);
+      const decision = decideBooking({
+        companyId,
+        memberCompanyId: companyId,
+        employeeId,
+        memberEmployeeId: employeeId,
+        shiftId,
+        now: Date.now(),
+        opening,
+        signupExists: false,
+        held,
+      });
+      if (!decision.ok || !opening) {
+        return {
+          ok: false as const,
+          reason: decision.ok ? "That shift is not open for booking yet." : decision.reason,
+        };
+      }
+
+      const signup: BookedSignup = {
+        id: decision.signupId,
+        shiftId,
+        employeeId,
+        status: "SELECTED",
+        selectedAt: decision.selectedAt,
+        confirmedAt: null,
+      };
+      transaction.update(openingRef, {
+        taken: decision.taken,
+        heldSignupId: decision.signupId,
+      });
+      transaction.set(signupRef, {
+        shiftId,
+        employeeId,
+        status: "SELECTED",
+        selectedAt: decision.selectedAt,
+        confirmedAt: null,
+      });
+      transaction.set(claimRef, {
+        employeeId,
+        bookings: [
+          ...claimed,
+          {
+            shiftId: opening.shiftId,
+            date: opening.date,
+            startTime: opening.startTime,
+            endTime: opening.endTime,
+          },
+        ],
+      });
+      return { ok: true as const, alreadyBooked: false, signup };
+    });
+  } catch (error) {
+    return remoteBookingError(error);
+  }
+}
+
+export async function cancelShiftRemote(
+  companyId: string,
+  employeeId: string,
+  shiftId: string,
+  knownSignupId?: string | null,
+): Promise<ShiftWriteResult> {
+  if (!canUseFirestore()) return remoteBookingError(new Error("offline"));
+  const signupId = signupDocumentId(employeeId, shiftId);
+  if (!signupId) return { ok: false, reason: "That shift is no longer available." };
+  const db = getFirebaseFirestore();
+  try {
+    return await runTransaction(db, async (transaction) => {
+      const openingRef = doc(db, "companies", companyId, "openings", shiftId);
+      const signupRef = doc(db, "companies", companyId, "signups", signupId);
+      const claimRef = doc(db, "companies", companyId, "claims", employeeId);
+      const knownRef =
+        knownSignupId && knownSignupId !== signupId
+          ? doc(db, "companies", companyId, "signups", knownSignupId)
+          : null;
+      const openingSnap = await transaction.get(openingRef);
+      const signupSnap = await transaction.get(signupRef);
+      const claimSnap = await transaction.get(claimRef);
+      const knownSnap = knownRef ? await transaction.get(knownRef) : null;
+      const match = signupSnap.exists()
+        ? signupSnap
+        : knownSnap?.exists() && ownsSignup(asRecord(knownSnap.data()), employeeId, shiftId)
+          ? knownSnap
+          : null;
+      const opening = readOpening(shiftId, openingSnap.exists() ? asRecord(openingSnap.data()) : null);
+      const decision = decideCancellation({
+        companyId,
+        memberCompanyId: companyId,
+        employeeId,
+        memberEmployeeId: employeeId,
+        shiftId,
+        now: Date.now(),
+        opening,
+        signupExists: Boolean(match),
+      });
+      if (!decision.ok) return { ok: false as const, reason: decision.reason };
+      if (decision.alreadyCancelled || !match) {
+        return { ok: true as const, alreadyCancelled: true, signup: null };
+      }
+      if (match.id === signupId) {
+        const claimed = readClaimBookings(claimSnap.exists() ? asRecord(claimSnap.data()) : null);
+        if (!claimed) {
+          return { ok: false as const, reason: "Could not update that shift. Try again." };
+        }
+        const bookings = claimed.filter((booking) => booking.shiftId !== shiftId);
+        if (bookings.length + 1 !== claimed.length) {
+          return { ok: false as const, reason: "Could not update that shift. Try again." };
+        }
+        transaction.set(claimRef, { employeeId, bookings });
+      }
+      transaction.update(openingRef, {
+        taken: decision.taken,
+        heldSignupId: match.id,
+      });
+      transaction.delete(match.ref);
+      return { ok: true as const, alreadyCancelled: false, signup: null };
+    });
+  } catch (error) {
+    return remoteBookingError(error);
+  }
+}
+
+export async function confirmShiftRemote(
+  companyId: string,
+  employeeId: string,
+  shiftId: string,
+  knownSignupId?: string | null,
+): Promise<ShiftWriteResult> {
+  if (!canUseFirestore()) return remoteBookingError(new Error("offline"));
+  const signupId = signupDocumentId(employeeId, shiftId);
+  if (!signupId) return { ok: false, reason: "That shift is no longer available." };
+  const db = getFirebaseFirestore();
+  try {
+    return await runTransaction(db, async (transaction) => {
+      const signupRef = doc(db, "companies", companyId, "signups", signupId);
+      const knownRef =
+        knownSignupId && knownSignupId !== signupId
+          ? doc(db, "companies", companyId, "signups", knownSignupId)
+          : null;
+      const openingSnap = await transaction.get(doc(db, "companies", companyId, "openings", shiftId));
+      const signupSnap = await transaction.get(signupRef);
+      const knownSnap = knownRef ? await transaction.get(knownRef) : null;
+      const match = signupSnap.exists()
+        ? signupSnap
+        : knownSnap?.exists() && ownsSignup(asRecord(knownSnap.data()), employeeId, shiftId)
+          ? knownSnap
+          : null;
+      const signup = match ? asBookedSignup(match.id, asRecord(match.data())) : null;
+      const decision = decideConfirmation({
+        companyId,
+        memberCompanyId: companyId,
+        employeeId,
+        memberEmployeeId: employeeId,
+        now: Date.now(),
+        opening: readOpening(shiftId, openingSnap.exists() ? asRecord(openingSnap.data()) : null),
+        signup,
+      });
+      if (!decision.ok) return { ok: false as const, reason: decision.reason };
+      if (!match || !signup || decision.alreadyConfirmed) {
+        return { ok: true as const, signup };
+      }
+      const confirmedAt = new Date().toISOString();
+      transaction.update(match.ref, {
+        status: "CONFIRMED",
+        confirmedAt,
+      });
+      return {
+        ok: true as const,
+        signup: { ...signup, status: "CONFIRMED", confirmedAt },
+      };
+    });
+  } catch (error) {
+    return remoteBookingError(error);
+  }
 }
 
 function hoursPayload(entry: HoursEntry): Record<string, unknown> {
@@ -564,33 +917,9 @@ export async function syncEmployeeActivityRemote(
   next: { signups: ShiftSignup[]; hours: HoursEntry[] },
 ): Promise<void> {
   if (!canUseFirestore()) return;
+  // Signup writes go through bookShiftRemote, confirmShiftRemote, and cancelShiftRemote
+  // so a timed-out retry cannot create a second assignment.
   const db = getFirebaseFirestore();
-  const own = (signup: ShiftSignup) => signup.employeeId === employeeId;
-  const before = new Map(previous.signups.filter(own).map((signup) => [signup.id, signup]));
-  const after = new Map(next.signups.filter(own).map((signup) => [signup.id, signup]));
-
-  for (const [id, signup] of after) {
-    const prior = before.get(id);
-    const ref = doc(db, "companies", companyId, "signups", id);
-    if (!prior) {
-      await setDoc(ref, signupPayload(signup, "SELECTED"));
-      if (signup.status === "CONFIRMED") {
-        await setDoc(ref, signupPayload(signup, "CONFIRMED"));
-      }
-      continue;
-    }
-    if (prior.status !== signup.status || prior.confirmedAt !== signup.confirmedAt) {
-      await setDoc(ref, signupPayload(signup, signup.status));
-    }
-  }
-
-  for (const [id, signup] of before) {
-    if (!after.has(id)) {
-      await deleteDoc(doc(db, "companies", companyId, "signups", id));
-    }
-    void signup;
-  }
-
   const previousHours = new Set(
     previous.hours.filter((entry) => entry.employeeId === employeeId).map((entry) => entry.id),
   );

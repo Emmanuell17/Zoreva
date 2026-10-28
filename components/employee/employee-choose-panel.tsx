@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
 import { PageHeader } from "@/components/layout/page-header";
+import { ShiftActionNotice } from "@/components/employee/shift-action-notice";
 import { ShiftCard, SpotsBadge } from "@/components/shifts/shift-card";
 import { ShiftCardList } from "@/components/shifts/shift-card-list";
 import { Badge } from "@/components/ui/badge";
@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { useCurrentEmployeeId } from "@/hooks/use-current-employee";
 import { useInitialLoading } from "@/hooks/use-initial-loading";
 import { useSchedule } from "@/hooks/use-schedule";
+import { useShiftCommand } from "@/hooks/use-shift-command";
 import { groupByDay } from "@/lib/group-by-day";
 import { confirmShift, selectShift } from "@/lib/services/schedule";
 import {
@@ -21,18 +22,30 @@ export function EmployeeChoosePanel() {
   const loading = useInitialLoading();
   const employeeId = useCurrentEmployeeId();
   const { shifts, signups } = useSchedule();
-  const [error, setError] = useState<string | null>(null);
+  const { pending, error, success, canRetry, run, retry } = useShiftCommand();
 
   const openShifts = shifts.filter((shift) => isUpcomingShift(shift));
   const grouped = groupByDay(openShifts);
 
   function handleChoose(shiftId: string) {
-    const result = selectShift(shiftId);
-    if (result.ok) {
-      setError(null);
-      return;
-    }
-    setError(result.reason);
+    void run(`book:${shiftId}`, async () => {
+      const result = await selectShift(shiftId);
+      if (!result.ok) return result;
+      return {
+        ok: true,
+        message: result.alreadyBooked
+          ? "You're already on this shift."
+          : "Your shift is saved.",
+      };
+    });
+  }
+
+  function handleConfirm(shiftId: string) {
+    void run(`confirm:${shiftId}`, async () => {
+      const result = await confirmShift(shiftId);
+      if (!result.ok) return result;
+      return { ok: true, message: "You're confirmed for this shift." };
+    });
   }
 
   return (
@@ -42,7 +55,11 @@ export function EmployeeChoosePanel() {
         description="Tap a shift you can work. Then confirm you are coming."
       />
 
-      {error ? <p className="mb-3 text-sm text-red-400">{error}</p> : null}
+      <ShiftActionNotice
+        error={error}
+        success={success}
+        onRetry={canRetry ? retry : null}
+      />
 
       <ShiftCardList
         loading={loading}
@@ -98,7 +115,9 @@ export function EmployeeChoosePanel() {
                         <Button
                           size="lg"
                           className="w-full sm:w-auto"
-                          onClick={() => confirmShift(shift.id)}
+                          loading={pending === `confirm:${shift.id}`}
+                          disabled={pending !== null}
+                          onClick={() => handleConfirm(shift.id)}
                         >
                           I&apos;m coming
                         </Button>
@@ -115,6 +134,8 @@ export function EmployeeChoosePanel() {
                       <Button
                         size="lg"
                         className="w-full sm:w-auto"
+                        loading={pending === `book:${shift.id}`}
+                        disabled={pending !== null}
                         onClick={() => handleChoose(shift.id)}
                       >
                         Choose this shift
