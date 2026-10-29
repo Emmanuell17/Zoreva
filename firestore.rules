@@ -60,8 +60,26 @@ service cloud.firestore {
 
     function validOpening(data) {
       return data.keys().hasOnly([
-          'slots', 'taken', 'date', 'startTime', 'endTime', 'endAt', 'heldSignupId'
+          'slots', 'taken', 'date', 'startTime', 'endTime', 'endAt', 'heldSignupId', 'startMin', 'endMin', 'timeZone'
         ])
+        && (
+          !data.keys().hasAny(['startMin', 'endMin'])
+          || (
+            data.keys().hasAll(['startMin', 'endMin'])
+            && data.startMin is int
+            && data.endMin is int
+            && data.endMin > data.startMin
+          )
+        )
+        && (
+          !data.keys().hasAny(['timeZone'])
+          || (
+            data.timeZone is string
+            && data.timeZone.size() > 0
+            && data.timeZone.size() < 64
+            && data.timeZone.matches('^[A-Za-z0-9_+\\-/]+$')
+          )
+        )
         && data.slots is int
         && data.slots >= 1
         && data.slots <= 500
@@ -111,9 +129,8 @@ service cloud.firestore {
       return /databases/$(database)/documents/companies/$(companyId)/claims/$(employeeId);
     }
 
-    function validBooking(booking) {
-      return booking.keys().hasOnly(['shiftId', 'date', 'startTime', 'endTime'])
-        && booking.shiftId is string
+    function bookingClock(booking) {
+      return booking.shiftId is string
         && booking.shiftId.size() > 0
         && booking.shiftId.size() < 120
         && booking.date is string
@@ -123,13 +140,37 @@ service cloud.firestore {
         && booking.startTime.size() <= 5
         && booking.endTime is string
         && booking.endTime.size() >= 4
-        && booking.endTime.size() <= 5;
+        && booking.endTime.size() <= 5
+        && (
+          !booking.keys().hasAny(['startMin', 'endMin'])
+          || (
+            booking.keys().hasAll(['startMin', 'endMin'])
+            && booking.startMin is int
+            && booking.endMin is int
+            && booking.endMin > booking.startMin
+          )
+        );
+    }
+
+    function validBooking(booking) {
+      return (
+          booking.keys().hasOnly(['shiftId', 'date', 'startTime', 'endTime'])
+          || booking.keys().hasOnly(['shiftId', 'date', 'startTime', 'endTime', 'startMin', 'endMin'])
+        )
+        && bookingClock(booking);
     }
 
     function matchesOpening(booking, opening) {
       return booking.date == opening.date
         && booking.startTime == opening.startTime
-        && booking.endTime == opening.endTime;
+        && booking.endTime == opening.endTime
+        && (
+          !opening.keys().hasAll(['startMin', 'endMin'])
+          || (
+            booking.startMin == opening.startMin
+            && booking.endMin == opening.endMin
+          )
+        );
     }
 
     function sameBooking(left, right) {
@@ -139,11 +180,21 @@ service cloud.firestore {
         && left.endTime == right.endTime;
     }
 
+    function bothBounded(left, right) {
+      return left.keys().hasAll(['startMin', 'endMin'])
+        && right.keys().hasAll(['startMin', 'endMin']);
+    }
+
     function timesCross(left, right) {
-      return left.date == right.date
-        && left.shiftId != right.shiftId
-        && left.startTime < right.endTime
-        && right.startTime < left.endTime;
+      return left.shiftId != right.shiftId && (
+        bothBounded(left, right)
+          ? (left.startMin < right.endMin && right.startMin < left.endMin)
+          : (
+            left.date == right.date
+            && left.startTime < right.endTime
+            && right.startTime < left.endTime
+          )
+      );
     }
 
     function hasShift(bookings, shiftId) {
@@ -235,6 +286,7 @@ service cloud.firestore {
 
     function releasedAt(companyId, employeeId, index) {
       return claimReleased(resource.data, request.resource.data, resource.data.bookings[index].shiftId)
+        && exists(signupPath(companyId, employeeId + '~' + resource.data.bookings[index].shiftId))
         && !existsAfter(signupPath(companyId, employeeId + '~' + resource.data.bookings[index].shiftId));
     }
 
@@ -257,18 +309,39 @@ service cloud.firestore {
     }
 
     function validCompany(data) {
-      return data.keys().hasOnly([
-          'id',
-          'ownerId',
-          'companyName',
-          'managerName',
-          'email',
-          'employeeCount',
-          'shiftTemplates',
-          'setupCompletedAt',
-          'joinCode',
-          'joinCodeExpiresAt'
-        ])
+      return (
+          data.keys().hasOnly([
+            'id',
+            'ownerId',
+            'companyName',
+            'managerName',
+            'email',
+            'employeeCount',
+            'shiftTemplates',
+            'setupCompletedAt',
+            'joinCode',
+            'joinCodeExpiresAt'
+          ])
+          || (
+            data.keys().hasOnly([
+              'id',
+              'ownerId',
+              'companyName',
+              'managerName',
+              'email',
+              'employeeCount',
+              'shiftTemplates',
+              'setupCompletedAt',
+              'joinCode',
+              'joinCodeExpiresAt',
+              'timezone'
+            ])
+            && data.timezone is string
+            && data.timezone.size() > 0
+            && data.timezone.size() < 64
+            && data.timezone.matches('^[A-Za-z0-9_+\\-/]+$')
+          )
+        )
         && data.id is string
         && data.id.size() > 0
         && data.id.size() < 80
@@ -335,6 +408,16 @@ service cloud.firestore {
           && request.resource.data.companyName.size() > 0
           && request.resource.data.companyName.size() < 200
           && request.resource.data.shiftTemplates is list
+          && request.resource.data.shifts is list;
+        allow delete: if false;
+      }
+
+      match /drafts/{docId} {
+        allow get: if docId == 'rota' && isManager(companyId);
+        allow list: if false;
+        allow create, update: if docId == 'rota'
+          && isManager(companyId)
+          && request.resource.data.keys().hasOnly(['shifts'])
           && request.resource.data.shifts is list;
         allow delete: if false;
       }
@@ -447,7 +530,8 @@ service cloud.firestore {
             request.resource.data.bookings[0],
             get(openingPath(companyId, request.resource.data.bookings[0].shiftId)).data
           )
-          && existsAfter(signupPath(companyId, employeeId + '~' + request.resource.data.bookings[0].shiftId));
+          && existsAfter(signupPath(companyId, employeeId + '~' + request.resource.data.bookings[0].shiftId))
+          || managerAddsClaim(companyId, employeeId);
 
         allow update: if isEmployee(companyId)
           && employeeId == memberData().employeeId
@@ -472,9 +556,104 @@ service cloud.firestore {
               && existsAfter(signupPath(companyId, employeeId + '~' + request.resource.data.bookings[resource.data.bookings.size()].shiftId))
             )
             || releasesClaim(companyId, employeeId)
-          );
+          )
+          || managerAddsClaim(companyId, employeeId)
+          || managerReleasesClaim(companyId, employeeId);
 
         allow delete: if false;
+      }
+
+      function assignmentPath(companyId, employeeId, shiftId) {
+        return /databases/$(database)/documents/companies/$(companyId)/assignments/$(employeeId + '~' + shiftId);
+      }
+
+      function managerAddsClaim(companyId, employeeId) {
+        return isManager(companyId)
+          && request.resource.data.keys().hasOnly(['employeeId', 'bookings'])
+          && request.resource.data.employeeId == employeeId
+          && request.resource.data.bookings is list
+          && request.resource.data.bookings.size() > 0
+          && request.resource.data.bookings.size() <= 12
+          && validBooking(request.resource.data.bookings[request.resource.data.bookings.size() - 1])
+          && matchesOpening(
+            request.resource.data.bookings[request.resource.data.bookings.size() - 1],
+            getAfter(openingPath(companyId, request.resource.data.bookings[request.resource.data.bookings.size() - 1].shiftId)).data
+          )
+          && existsAfter(assignmentPath(
+            companyId,
+            employeeId,
+            request.resource.data.bookings[request.resource.data.bookings.size() - 1].shiftId
+          ))
+          && (
+            !exists(claimPath(companyId, employeeId))
+            || (
+              resource.data.keys().hasOnly(['employeeId', 'bookings'])
+              && resource.data.employeeId == employeeId
+              && resource.data.bookings is list
+              && request.resource.data.bookings.size() == resource.data.bookings.size() + 1
+              && prefixKept(resource.data.bookings, request.resource.data.bookings)
+              && !hasShift(resource.data.bookings, request.resource.data.bookings[resource.data.bookings.size()].shiftId)
+              && !overlapsHeld(resource.data.bookings, request.resource.data.bookings[resource.data.bookings.size()])
+            )
+          );
+      }
+
+      function managerReleasedAt(companyId, employeeId, index) {
+        return claimReleased(resource.data, request.resource.data, resource.data.bookings[index].shiftId)
+          && !existsAfter(assignmentPath(companyId, employeeId, resource.data.bookings[index].shiftId));
+      }
+
+      function managerReleasesClaim(companyId, employeeId) {
+        return isManager(companyId)
+          && request.resource.data.bookings.size() + 1 == resource.data.bookings.size()
+          && (
+            (resource.data.bookings.size() > 0 && managerReleasedAt(companyId, employeeId, 0))
+            || (resource.data.bookings.size() > 1 && managerReleasedAt(companyId, employeeId, 1))
+            || (resource.data.bookings.size() > 2 && managerReleasedAt(companyId, employeeId, 2))
+            || (resource.data.bookings.size() > 3 && managerReleasedAt(companyId, employeeId, 3))
+            || (resource.data.bookings.size() > 4 && managerReleasedAt(companyId, employeeId, 4))
+            || (resource.data.bookings.size() > 5 && managerReleasedAt(companyId, employeeId, 5))
+            || (resource.data.bookings.size() > 6 && managerReleasedAt(companyId, employeeId, 6))
+            || (resource.data.bookings.size() > 7 && managerReleasedAt(companyId, employeeId, 7))
+            || (resource.data.bookings.size() > 8 && managerReleasedAt(companyId, employeeId, 8))
+            || (resource.data.bookings.size() > 9 && managerReleasedAt(companyId, employeeId, 9))
+            || (resource.data.bookings.size() > 10 && managerReleasedAt(companyId, employeeId, 10))
+            || (resource.data.bookings.size() > 11 && managerReleasedAt(companyId, employeeId, 11))
+          );
+      }
+
+      match /assignments/{assignmentId} {
+        allow read: if isMember(companyId);
+        allow create: if isManager(companyId)
+          && request.resource.data.keys().hasOnly([
+            'employeeId', 'shiftId', 'date', 'startTime', 'endTime', 'startMin', 'endMin'
+          ])
+          && assignmentId == request.resource.data.employeeId + '~' + request.resource.data.shiftId
+          && assignmentId.size() < 400
+          && request.resource.data.employeeId is string
+          && request.resource.data.employeeId.size() > 0
+          && request.resource.data.employeeId.size() < 200
+          && bookingClock(request.resource.data)
+          && request.resource.data.keys().hasAll(['startMin', 'endMin'])
+          && matchesOpening(
+            request.resource.data,
+            getAfter(openingPath(companyId, request.resource.data.shiftId)).data
+          )
+          && existsAfter(claimPath(companyId, request.resource.data.employeeId))
+          && hasBooking(
+            getAfter(claimPath(companyId, request.resource.data.employeeId)).data.bookings,
+            request.resource.data
+          );
+        allow update: if false;
+        allow delete: if isManager(companyId)
+          && resource.data.employeeId is string
+          && resource.data.shiftId is string
+          && assignmentId == resource.data.employeeId + '~' + resource.data.shiftId
+          && exists(claimPath(companyId, resource.data.employeeId))
+          && !hasShift(
+            getAfter(claimPath(companyId, resource.data.employeeId)).data.bookings,
+            resource.data.shiftId
+          );
       }
 
       match /signups/{signupId} {
@@ -553,6 +732,104 @@ service cloud.firestore {
           && request.resource.data.submittedAt.size() < 40;
 
         allow update, delete: if false;
+      }
+
+      match /availability/{windowId} {
+        allow read: if isManager(companyId)
+          || (isEmployee(companyId) && resource.data.employeeId == memberData().employeeId);
+
+        allow create: if isEmployee(companyId)
+          && request.resource.data.keys().hasOnly([
+            'employeeId', 'kind', 'weekday', 'date', 'startTime', 'endTime', 'available', 'note', 'updatedAt'
+          ])
+          && request.resource.data.employeeId == memberData().employeeId
+          && request.resource.data.kind in ['recurring', 'date']
+          && request.resource.data.weekday is int
+          && request.resource.data.weekday >= -1
+          && request.resource.data.weekday <= 6
+          && request.resource.data.date is string
+          && request.resource.data.date.size() <= 10
+          && request.resource.data.startTime is string
+          && request.resource.data.endTime is string
+          && request.resource.data.available is bool
+          && request.resource.data.note is string
+          && request.resource.data.note.size() <= 200
+          && request.resource.data.updatedAt is string
+          && request.resource.data.updatedAt.size() < 40
+          && (
+            request.resource.data.kind == 'recurring'
+            || request.resource.data.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+          );
+
+        allow update: if isEmployee(companyId)
+          && resource.data.employeeId == memberData().employeeId
+          && request.resource.data.keys().hasOnly([
+            'employeeId', 'kind', 'weekday', 'date', 'startTime', 'endTime', 'available', 'note', 'updatedAt'
+          ])
+          && request.resource.data.employeeId == memberData().employeeId
+          && request.resource.data.kind in ['recurring', 'date']
+          && request.resource.data.weekday is int
+          && request.resource.data.weekday >= -1
+          && request.resource.data.weekday <= 6
+          && request.resource.data.date is string
+          && request.resource.data.date.size() <= 10
+          && request.resource.data.startTime is string
+          && request.resource.data.endTime is string
+          && request.resource.data.available is bool
+          && request.resource.data.note is string
+          && request.resource.data.note.size() <= 200
+          && request.resource.data.updatedAt is string
+          && request.resource.data.updatedAt.size() < 40
+          && (
+            request.resource.data.kind == 'recurring'
+            || request.resource.data.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+          );
+
+        allow delete: if isEmployee(companyId)
+          && resource.data.employeeId == memberData().employeeId;
+      }
+
+      match /timeOff/{requestId} {
+        allow read: if isManager(companyId)
+          || (isEmployee(companyId) && resource.data.employeeId == memberData().employeeId);
+
+        allow create: if isEmployee(companyId)
+          && request.resource.data.keys().hasOnly([
+            'employeeId', 'startDate', 'endDate', 'startTime', 'endTime', 'reason', 'status', 'reviewNote', 'createdAt', 'reviewedAt'
+          ])
+          && request.resource.data.employeeId == memberData().employeeId
+          && request.resource.data.status == 'pending'
+          && request.resource.data.startDate is string
+          && request.resource.data.endDate is string
+          && request.resource.data.startDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+          && request.resource.data.endDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+          && request.resource.data.startTime is string
+          && request.resource.data.endTime is string
+          && request.resource.data.reason is string
+          && request.resource.data.reason.size() <= 200
+          && request.resource.data.reviewNote == ''
+          && request.resource.data.reviewedAt == ''
+          && request.resource.data.createdAt is string;
+
+        allow update: if isManager(companyId)
+          && request.resource.data.keys().hasOnly([
+            'employeeId', 'startDate', 'endDate', 'startTime', 'endTime', 'reason', 'status', 'reviewNote', 'createdAt', 'reviewedAt'
+          ])
+          && resource.data.status == 'pending'
+          && request.resource.data.status in ['approved', 'rejected']
+          && request.resource.data.employeeId == resource.data.employeeId
+          && request.resource.data.startDate == resource.data.startDate
+          && request.resource.data.endDate == resource.data.endDate
+          && request.resource.data.startTime == resource.data.startTime
+          && request.resource.data.endTime == resource.data.endTime
+          && request.resource.data.reason == resource.data.reason
+          && request.resource.data.createdAt == resource.data.createdAt
+          && request.resource.data.reviewNote is string
+          && request.resource.data.reviewedAt is string;
+
+        allow delete: if isEmployee(companyId)
+          && resource.data.employeeId == memberData().employeeId
+          && resource.data.status == 'pending';
       }
     }
 

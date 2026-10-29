@@ -10,7 +10,9 @@
     "test:advisor": "node scripts/test-advisor-validate.mjs",
     "test:infinisynapse": "node scripts/test-infinisynapse.mjs",
     "test:security": "node --import tsx --test lib/security/policy.test.ts lib/auth/require-manager.test.ts lib/advisor/ownership.test.ts",
-    "test:booking": "node --import tsx --test lib/shifts/booking.test.ts",
+    "test:booking": "node --import tsx --test lib/shifts/booking.test.ts lib/shifts/backfill.test.ts lib/time/zoned.test.ts",
+    "test:rota": "node --import tsx --test lib/rota/week.test.ts",
+    "test:availability": "node --import tsx --test lib/availability/conflicts.test.ts lib/availability/flow.test.ts",
     "test:rules": "firebase emulators:exec --only firestore --project demo-zoreva-rules \"node --import tsx --test tests/firestore-rules.test.ts\""
   },
   "dependencies": {

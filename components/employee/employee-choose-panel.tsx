@@ -6,25 +6,27 @@ import { ShiftCard, SpotsBadge } from "@/components/shifts/shift-card";
 import { ShiftCardList } from "@/components/shifts/shift-card-list";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { useCompany } from "@/hooks/use-company";
 import { useCurrentEmployeeId } from "@/hooks/use-current-employee";
 import { useInitialLoading } from "@/hooks/use-initial-loading";
 import { useSchedule } from "@/hooks/use-schedule";
+import { assignmentConflicts } from "@/lib/availability/conflicts";
 import { useShiftCommand } from "@/hooks/use-shift-command";
 import { groupByDay } from "@/lib/group-by-day";
+import { coverageForShift, isPublishedShift } from "@/lib/rota/week";
 import { confirmShift, selectShift } from "@/lib/services/schedule";
-import {
-  employeeHasOverlap,
-  isUpcomingShift,
-  remainingSlots,
-} from "@/lib/shift-utils";
+import { employeeHasOverlap, isUpcomingShift } from "@/lib/shift-utils";
 
 export function EmployeeChoosePanel() {
   const loading = useInitialLoading();
   const employeeId = useCurrentEmployeeId();
+  const company = useCompany();
   const { shifts, signups } = useSchedule();
   const { pending, error, success, canRetry, run, retry } = useShiftCommand();
 
-  const openShifts = shifts.filter((shift) => isUpcomingShift(shift));
+  const openShifts = shifts.filter(
+    (shift) => isPublishedShift(shift) && isUpcomingShift(shift),
+  );
   const grouped = groupByDay(openShifts);
 
   function handleChoose(shiftId: string) {
@@ -65,7 +67,7 @@ export function EmployeeChoosePanel() {
         loading={loading}
         empty={openShifts.length === 0}
         emptyTitle="No open shifts right now"
-        emptyDescription="When an admin adds a shift, it will show up here."
+        emptyDescription="When your manager publishes a shift, it will show up here."
       >
         {grouped.map((group) => (
           <div key={group.label} className="grid gap-2">
@@ -73,7 +75,25 @@ export function EmployeeChoosePanel() {
               {group.label}
             </h3>
             {group.items.map((shift) => {
-              const remaining = remainingSlots(shift, signups);
+              const remaining = coverageForShift(shift, signups).open;
+              const planned = (shift.assigneeIds ?? []).includes(employeeId);
+              const conflicts = assignmentConflicts({
+                employeeId,
+                shift,
+                shifts,
+                signups,
+                availability: company?.availability,
+                timeOff: company?.timeOff,
+                rules: company?.availabilityRules,
+              });
+              const blocked = conflicts.blockers.find((item) => item.code !== "overlap");
+              const caution = conflicts.warnings[0];
+              const asYou = (reason: string) =>
+                reason
+                  .replace("This person has", "You have")
+                  .replace("This person asked", "You asked")
+                  .replace("This person said", "You said")
+                  .replace("This person did not", "You did not");
               const mine = signups.find(
                 (signup) =>
                   signup.shiftId === shift.id &&
@@ -95,15 +115,17 @@ export function EmployeeChoosePanel() {
                   label={shift.label}
                   note={shift.note}
                   badges={
-                    mine ? (
+                    mine || planned ? (
                       <Badge
                         variant={
-                          mine.status === "CONFIRMED" ? "confirmed" : "pending"
+                          mine?.status === "CONFIRMED" ? "confirmed" : "pending"
                         }
                       >
-                        {mine.status === "CONFIRMED"
+                        {mine?.status === "CONFIRMED"
                           ? "You're coming"
-                          : "You chose this"}
+                          : mine
+                            ? "You chose this"
+                            : "You're scheduled"}
                       </Badge>
                     ) : (
                       <SpotsBadge remaining={remaining} slots={shift.slots} />
@@ -122,6 +144,12 @@ export function EmployeeChoosePanel() {
                           I&apos;m coming
                         </Button>
                       ) : null
+                    ) : planned ? (
+                      <Button size="sm" disabled>
+                        Already planned
+                      </Button>
+                    ) : blocked ? (
+                      <p className="text-xs text-amber-200">{asYou(blocked.reason)}</p>
                     ) : remaining <= 0 ? (
                       <Button size="sm" disabled>
                         Full
@@ -131,15 +159,20 @@ export function EmployeeChoosePanel() {
                         Overlaps your other shift
                       </Button>
                     ) : (
-                      <Button
-                        size="lg"
-                        className="w-full sm:w-auto"
-                        loading={pending === `book:${shift.id}`}
-                        disabled={pending !== null}
-                        onClick={() => handleChoose(shift.id)}
-                      >
-                        Choose this shift
-                      </Button>
+                      <div className="grid gap-2">
+                        {caution ? (
+                          <p className="text-xs text-amber-200">{asYou(caution.reason)}</p>
+                        ) : null}
+                        <Button
+                          size="lg"
+                          className="w-full sm:w-auto"
+                          loading={pending === `book:${shift.id}`}
+                          disabled={pending !== null}
+                          onClick={() => handleChoose(shift.id)}
+                        >
+                          Choose this shift
+                        </Button>
+                      </div>
                     )
                   }
                 />

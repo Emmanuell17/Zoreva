@@ -69,6 +69,26 @@ export function canWriteSchedule(actor: AccessActor, companyId: string): boolean
   return isManager(actor, companyId);
 }
 
+export function canPublishRota(actor: AccessActor, companyId: string): boolean {
+  return isManager(actor, companyId);
+}
+
+export function canReadDraftRota(actor: AccessActor, companyId: string): boolean {
+  return isManager(actor, companyId);
+}
+
+export function canEditOwnAvailability(
+  actor: AccessActor,
+  companyId: string,
+  employeeId: string,
+): boolean {
+  return isEmployee(actor, companyId) && actor.membership?.employeeId === employeeId;
+}
+
+export function canReviewTimeOff(actor: AccessActor, companyId: string): boolean {
+  return isManager(actor, companyId);
+}
+
 export function canReadHours(
   actor: AccessActor,
   companyId: string,
@@ -246,6 +266,7 @@ export function privateCompanyPayload(company: Company): Record<string, unknown>
     setupCompletedAt: company.setupCompletedAt,
     joinCode: company.joinCode.toUpperCase().replace(/[^A-Z0-9]/g, ""),
     joinCodeExpiresAt: expiresAt,
+    ...(company.timezone ? { timezone: company.timezone } : {}),
   };
 }
 
@@ -253,7 +274,13 @@ export function publishedSchedulePayload(company: Company): Record<string, unkno
   return {
     companyName: company.companyName,
     shiftTemplates: company.shiftTemplates,
-    shifts: company.shifts,
+    shifts: company.shifts.filter((shift) => shift.status !== "draft"),
+  };
+}
+
+export function draftRotaPayload(company: Company): Record<string, unknown> {
+  return {
+    shifts: company.shifts.filter((shift) => shift.status === "draft"),
   };
 }
 
@@ -299,5 +326,7 @@ export function redactCompanyForMember(
       role: "EMPLOYEE",
     })),
     hours: company.hours.filter((entry) => entry.employeeId === employeeId),
+    availability: (company.availability ?? []).filter((window) => window.employeeId === employeeId),
+    timeOff: (company.timeOff ?? []).filter((request) => request.employeeId === employeeId),
   };
 }

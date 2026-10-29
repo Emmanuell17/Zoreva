@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { useCurrentEmployeeId } from "@/hooks/use-current-employee";
 import { useInitialLoading } from "@/hooks/use-initial-loading";
 import { useSchedule } from "@/hooks/use-schedule";
+import { isPublishedShift } from "@/lib/rota/week";
 import { submitHours } from "@/lib/services/schedule";
 import {
   formatHourCount,
@@ -29,7 +30,9 @@ export function EmployeeHoursPanel() {
   const past = signups
     .filter((signup) => signup.employeeId === employeeId)
     .map((signup) => {
-      const shift = shifts.find((item) => item.id === signup.shiftId);
+      const shift = shifts.find(
+        (item) => item.id === signup.shiftId && isPublishedShift(item),
+      );
       if (!shift || !isPastShift(shift)) return null;
       return {
         shift,

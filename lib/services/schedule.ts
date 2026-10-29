@@ -1,15 +1,27 @@
 import {
+  assignEmployeeRemote,
   bookShiftRemote,
   cancelShiftRemote,
   confirmShiftRemote,
+  releaseAssignmentRemote,
+  syncShiftOpeningsRemote,
 } from "@/lib/company/cloud";
 import {
+  getActiveCompany,
   getBookingSession,
   getCurrentEmployeeId,
   persistActiveSchedule,
   registerScheduleBridge,
 } from "@/lib/company/store";
+import { assignmentConflicts } from "@/lib/availability/conflicts";
+import { getEmployeeName } from "@/lib/services/employees";
 import { canUseFirestore } from "@/lib/firebase/firestore";
+import {
+  coverageForShift,
+  duplicateWeek,
+  isPublishedShift,
+  weekStartKey,
+} from "@/lib/rota/week";
 import { hoursSeed } from "@/lib/mocks/hours";
 import { shiftsSeed } from "@/lib/mocks/shifts";
 import { signupsSeed } from "@/lib/mocks/signups";
@@ -24,12 +36,15 @@ import {
   type ShiftWriteResult,
 } from "@/lib/shifts/booking";
 import {
+  calendarDayKey,
   hoursForSignup,
   isPastShift,
   isSameShiftSlot,
   signupsForShift,
   sortShifts,
 } from "@/lib/shift-utils";
+import { shiftsOverlap } from "@/lib/time/interval";
+import { DEFAULT_BUSINESS_TIMEZONE } from "@/lib/time/zoned";
 import type { HoursEntry, Shift, ShiftSignup } from "@/types";
 
 export type ScheduleSnapshot = {
@@ -227,7 +242,32 @@ export function getSignupForShift(
   );
 }
 
+function employeeOverlapsAssignment(employeeId: string, shift: Shift): boolean {
+  const target = {
+    date: calendarDayKey(shift.date),
+    startTime: shift.startTime,
+    endTime: shift.endTime,
+  };
+  return shifts.some((other) => {
+    if (other.id === shift.id) return false;
+    if (!(other.assigneeIds ?? []).includes(employeeId)) return false;
+    return shiftsOverlap(target, {
+      date: calendarDayKey(other.date),
+      startTime: other.startTime,
+      endTime: other.endTime,
+    });
+  });
+}
+
+function managerDenied(): { ok: false; reason: string } | null {
+  if (!canUseFirestore()) return null;
+  const session = getBookingSession();
+  if (session?.role === "ADMIN") return null;
+  return { ok: false, reason: "Only a manager can change the rota." };
+}
+
 export function createShifts(inputs: CreateShiftInput[]): Shift[] {
+  if (managerDenied()) return [];
   const uniqueInputs: CreateShiftInput[] = [];
 
   for (const input of inputs) {
@@ -248,6 +288,8 @@ export function createShifts(inputs: CreateShiftInput[]): Shift[] {
     label: input.label?.trim() || null,
     note: input.note?.trim() || null,
     positions: input.positions?.length ? [...input.positions] : null,
+    assigneeIds: [] as string[],
+    status: "draft" as const,
     createdAt: new Date().toISOString(),
   }));
 
@@ -260,19 +302,21 @@ export function updateShift(
   shiftId: string,
   input: CreateShiftInput,
 ): { ok: true } | { ok: false; reason: string } {
+  const denied = managerDenied();
+  if (denied) return denied;
   const existing = getShiftById(shiftId);
   if (!existing) {
     return { ok: false, reason: "That shift is no longer available." };
   }
-  if (isPastShift(existing)) {
+  if (isPastShift(existing, new Date(), businessZone())) {
     return { ok: false, reason: "This shift has already finished." };
   }
 
-  const taken = signupsForShift(signups, shiftId).length;
+  const taken = coverageForShift(existing, signups).filled;
   if (input.slots < taken) {
     return {
       ok: false,
-      reason: `${taken} ${taken === 1 ? "person has" : "people have"} already chosen this shift. Keep at least ${taken} spots.`,
+      reason: `${taken} ${taken === 1 ? "person is" : "people are"} already on this shift. Keep at least ${taken} spots.`,
     };
   }
 
@@ -303,14 +347,183 @@ export function updateShift(
   return { ok: true };
 }
 
-export function removeShift(shiftId: string): boolean {
+export function removeShift(
+  shiftId: string,
+): { ok: true } | { ok: false; reason: string } {
+  const denied = managerDenied();
+  if (denied) return denied;
   const shift = getShiftById(shiftId);
-  if (!shift || isPastShift(shift)) return false;
-  if (signupsForShift(signups, shiftId).length > 0) return false;
+  if (!shift) return { ok: false, reason: "That shift is no longer available." };
+  if (isPastShift(shift, new Date(), businessZone())) {
+    return { ok: false, reason: "This shift has already finished." };
+  }
+  if (signupsForShift(signups, shiftId).length > 0) {
+    return {
+      ok: false,
+      reason: "People have already chosen this shift, so it stays on the rota.",
+    };
+  }
 
   shifts = shifts.filter((item) => item.id !== shiftId);
   notify();
-  return true;
+  return { ok: true };
+}
+
+function businessZone(): string {
+  return getActiveCompany()?.timezone || DEFAULT_BUSINESS_TIMEZONE;
+}
+
+export async function assignEmployee(
+  shiftId: string,
+  employeeId: string,
+  options?: { acknowledgeWarnings?: boolean },
+): Promise<{ ok: true } | { ok: false; reason: string; level: "block" | "warn"; warnings: string[] }> {
+  const denied = managerDenied();
+  if (denied) return { ...denied, level: "block", warnings: [] };
+  const shift = getShiftById(shiftId);
+  if (!shift) {
+    return { ok: false, level: "block", warnings: [], reason: "That shift is no longer available." };
+  }
+  if (isPastShift(shift, new Date(), businessZone())) {
+    return { ok: false, level: "block", warnings: [], reason: "This shift has already finished." };
+  }
+  if ((shift.assigneeIds ?? []).includes(employeeId)) return { ok: true };
+  const company = getActiveCompany();
+  const conflicts = assignmentConflicts({
+    employeeId,
+    employeeName: getEmployeeName(employeeId),
+    shift,
+    shifts,
+    signups,
+    availability: company?.availability,
+    timeOff: company?.timeOff,
+    rules: company?.availabilityRules,
+  });
+  if (conflicts.blockers.length > 0) {
+    return {
+      ok: false,
+      level: "block",
+      warnings: [],
+      reason: conflicts.blockers.map((item) => item.reason).join(" "),
+    };
+  }
+  const warningText = conflicts.warnings.map((item) => item.reason);
+  if (warningText.length > 0 && !options?.acknowledgeWarnings) {
+    return {
+      ok: false,
+      level: "warn",
+      warnings: warningText,
+      reason: warningText.join(" "),
+    };
+  }
+  if (shift.status !== "draft" && canUseFirestore()) {
+    const company = getActiveCompany();
+    const session = getBookingSession();
+    if (company && session?.role === "ADMIN" && session.companyId === company.id) {
+      const saved = await assignEmployeeRemote(company.id, employeeId, shift.id);
+      if (!saved.ok) {
+        return { ok: false, level: "block", warnings: [], reason: saved.reason };
+      }
+    }
+  }
+  shifts = shifts.map((item) =>
+    item.id === shiftId
+      ? { ...item, assigneeIds: [...(item.assigneeIds ?? []), employeeId] }
+      : item,
+  );
+  notify();
+  return { ok: true };
+}
+
+export async function unassignEmployee(
+  shiftId: string,
+  employeeId: string,
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  const denied = managerDenied();
+  if (denied) return denied;
+  const shift = getShiftById(shiftId);
+  if (!shift) return { ok: false, reason: "That shift is no longer available." };
+  if (shift.status !== "draft" && canUseFirestore()) {
+    const company = getActiveCompany();
+    const session = getBookingSession();
+    if (company && session?.role === "ADMIN" && session.companyId === company.id) {
+      const saved = await releaseAssignmentRemote(company.id, employeeId, shift.id);
+      if (!saved.ok) return saved;
+    }
+  }
+  shifts = shifts.map((item) =>
+    item.id === shiftId
+      ? {
+          ...item,
+          assigneeIds: (item.assigneeIds ?? []).filter((id) => id !== employeeId),
+        }
+      : item,
+  );
+  notify();
+  return { ok: true };
+}
+
+export async function publishWeek(
+  weekStart: string,
+): Promise<{ ok: true; published: number } | { ok: false; reason: string }> {
+  const denied = managerDenied();
+  if (denied) return denied;
+  const start = weekStartKey(weekStart);
+  const drafts = shifts.filter(
+    (shift) => weekStartKey(shift.date) === start && shift.status === "draft",
+  );
+  if (drafts.length === 0) {
+    return { ok: false, reason: "This week has no draft shifts to publish." };
+  }
+  if (canUseFirestore()) {
+    const company = getActiveCompany();
+    const session = getBookingSession();
+    if (company && session?.role === "ADMIN" && session.companyId === company.id) {
+      await syncShiftOpeningsRemote(company.id, drafts, signups, company.timezone);
+      for (const shift of drafts) {
+        for (const employeeId of shift.assigneeIds ?? []) {
+          const saved = await assignEmployeeRemote(company.id, employeeId, shift.id);
+          if (!saved.ok) return { ok: false, reason: saved.reason };
+        }
+      }
+    }
+  }
+  let published = 0;
+  shifts = shifts.map((shift) => {
+    if (weekStartKey(shift.date) !== start || shift.status !== "draft") return shift;
+    published += 1;
+    return { ...shift, status: "published" };
+  });
+  if (published === 0) {
+    return { ok: false, reason: "This week has no draft shifts to publish." };
+  }
+  notify();
+  return { ok: true, published };
+}
+
+export function copyPreviousWeek(
+  weekStart: string,
+): { ok: true; created: number; skipped: number } | { ok: false; reason: string } {
+  const denied = managerDenied();
+  if (denied) return denied;
+  const result = duplicateWeek({
+    source: shifts,
+    targetWeek: weekStart,
+    existing: shifts,
+    createId: (index) => `shift_${Date.now()}_${index}`,
+  });
+  if (result.created.length === 0) {
+    return {
+      ok: false,
+      reason:
+        result.skipped > 0
+          ? "Those shifts are already on this week."
+          : "Last week has no shifts to copy.",
+    };
+  }
+  shifts = [...shifts, ...result.created];
+  notify();
+  return { ok: true, created: result.created.length, skipped: result.skipped };
 }
 
 function storedSignup(signup: ShiftSignup): BookedSignup {
@@ -339,6 +552,46 @@ export async function selectShift(
   shiftId: string,
   employeeId: string = getCurrentEmployeeId(),
 ): Promise<ShiftWriteResult> {
+  const listed = getShiftById(shiftId);
+  if (listed && !isPublishedShift(listed)) {
+    return { ok: false, reason: "That shift is not published yet." };
+  }
+  if (listed?.assigneeIds?.includes(employeeId)) {
+    return { ok: false, reason: "You're already planned for this shift." };
+  }
+  if (
+    listed &&
+    !getSignupForShift(shiftId, employeeId) &&
+    coverageForShift(listed, signups).open <= 0
+  ) {
+    return { ok: false, reason: "This shift is full." };
+  }
+  if (listed && employeeOverlapsAssignment(employeeId, listed)) {
+    return { ok: false, reason: "That overlaps a shift you're already on." };
+  }
+  if (listed) {
+    const company = getActiveCompany();
+    const conflicts = assignmentConflicts({
+      employeeId,
+      shift: listed,
+      shifts,
+      signups,
+      availability: company?.availability,
+      timeOff: company?.timeOff,
+      rules: company?.availabilityRules,
+    });
+    const blocker = conflicts.blockers.find((item) => item.code !== "overlap");
+    if (blocker) {
+      return {
+        ok: false,
+        reason: blocker.reason
+          .replace("This person has", "You have")
+          .replace("This person asked", "You asked")
+          .replace("This person said", "You said")
+          .replace("This person did not", "You did not"),
+      };
+    }
+  }
   const actor = remoteActor(employeeId);
   if (actor && "error" in actor) return { ok: false, reason: actor.error };
   if (actor) {
@@ -491,7 +744,7 @@ export function submitHours(
   const employeeId = input.employeeId ?? getCurrentEmployeeId();
   const shift = getShiftById(input.shiftId);
   if (!shift) return { ok: false, reason: "Shift not found." };
-  if (!isPastShift(shift)) {
+  if (!isPastShift(shift, new Date(), businessZone())) {
     return { ok: false, reason: "Enter hours after the shift ends." };
   }
 

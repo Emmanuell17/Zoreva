@@ -7,6 +7,7 @@ import {
   initializeTestEnvironment,
   type RulesTestEnvironment,
 } from "@firebase/rules-unit-testing";
+import { civilInterval } from "@/lib/time/interval";
 import {
   collection,
   deleteDoc,
@@ -559,4 +560,259 @@ test("shift booking rules keep the last seat, block duplicates, and require a ma
     ]),
   );
   await assertSucceeds(later.commit());
+});
+
+test("only a manager can read or write the draft rota", async () => {
+  const employee = testEnv.authenticatedContext("emp1", { email: "sam@cafe.test" }).firestore();
+  const owner = testEnv.authenticatedContext("owner1", { email: "ada@cafe.test" }).firestore();
+  const signedOut = testEnv.unauthenticatedContext().firestore();
+
+  await assertFails(getDoc(doc(signedOut, "companies/co1/drafts/rota")));
+  await assertFails(getDoc(doc(employee, "companies/co1/drafts/rota")));
+  await assertFails(setDoc(doc(employee, "companies/co1/drafts/rota"), { shifts: [] }));
+  await assertSucceeds(
+    setDoc(doc(owner, "companies/co1/drafts/rota"), {
+      shifts: [{ id: "draft1", status: "draft" }],
+    }),
+  );
+  await assertSucceeds(getDoc(doc(owner, "companies/co1/drafts/rota")));
+  await assertFails(
+    setDoc(doc(owner, "companies/co1/drafts/rota"), { shifts: [], note: "extra" }),
+  );
+  await assertFails(deleteDoc(doc(owner, "companies/co1/drafts/rota")));
+});
+
+test("availability and time off stay inside one company and one employee", async () => {
+  const employee = testEnv.authenticatedContext("emp1", { email: "sam@cafe.test" }).firestore();
+  const owner = testEnv.authenticatedContext("owner1", { email: "ada@cafe.test" }).firestore();
+  const otherOwner = testEnv.authenticatedContext("owner2", { email: "other@cafe.test" }).firestore();
+  const availability = {
+    employeeId: "co1_emp1",
+    kind: "recurring",
+    weekday: 1,
+    date: "",
+    startTime: "09:00",
+    endTime: "17:00",
+    available: true,
+    note: "",
+    updatedAt: "2026-10-20T00:00:00.000Z",
+  };
+  const timeOff = {
+    employeeId: "co1_emp1",
+    startDate: "2026-11-02",
+    endDate: "2026-11-02",
+    startTime: "",
+    endTime: "",
+    reason: "Appointment",
+    status: "pending",
+    reviewNote: "",
+    createdAt: "2026-10-20T00:00:00.000Z",
+    reviewedAt: "",
+  };
+
+  await assertFails(setDoc(doc(employee, "companies/co2/availability/a1"), availability));
+  await assertFails(
+    setDoc(doc(employee, "companies/co1/availability/a1"), { ...availability, employeeId: "co1_other" }),
+  );
+  await assertSucceeds(setDoc(doc(employee, "companies/co1/availability/a1"), availability));
+  await assertFails(getDoc(doc(otherOwner, "companies/co1/availability/a1")));
+  await assertSucceeds(getDoc(doc(owner, "companies/co1/availability/a1")));
+  await assertFails(deleteDoc(doc(owner, "companies/co1/availability/a1")));
+
+  await assertFails(
+    setDoc(doc(employee, "companies/co1/timeOff/t1"), { ...timeOff, status: "approved" }),
+  );
+  await assertSucceeds(setDoc(doc(employee, "companies/co1/timeOff/t1"), timeOff));
+  await assertFails(
+    updateDoc(doc(employee, "companies/co1/timeOff/t1"), { status: "approved", reviewedAt: "2026-10-21T00:00:00.000Z" }),
+  );
+  await assertFails(getDoc(doc(otherOwner, "companies/co1/timeOff/t1")));
+  await assertSucceeds(
+    setDoc(doc(owner, "companies/co1/timeOff/t1"), {
+      ...timeOff,
+      status: "approved",
+      reviewedAt: "2026-10-21T00:00:00.000Z",
+    }),
+  );
+  await assertFails(deleteDoc(doc(employee, "companies/co1/timeOff/t1")));
+});
+
+function boundedOpening(
+  date: string,
+  startTime: string,
+  endTime: string,
+) {
+  const span = civilInterval(date, startTime, endTime);
+  assert.ok(span);
+  return {
+    ...openingData(1, 0, LATER, startTime, endTime, date),
+    startMin: span.start,
+    endMin: span.end,
+  };
+}
+
+function boundedClaim(
+  employeeId: string,
+  bookings: Array<{ shiftId: string; date: string; startTime: string; endTime: string }>,
+) {
+  return {
+    employeeId,
+    bookings: bookings.map((booking) => {
+      const span = civilInterval(booking.date, booking.startTime, booking.endTime);
+      assert.ok(span);
+      return { ...booking, startMin: span.start, endMin: span.end };
+    }),
+  };
+}
+
+test("overnight bookings overlap across calendar dates when bounds are stored", async () => {
+  const employee = testEnv.authenticatedContext("emp1", { email: "sam@cafe.test" }).firestore();
+  const night = boundedOpening("2026-10-26", "22:00", "06:00");
+  const early = boundedOpening("2026-10-27", "01:00", "03:00");
+  const after = boundedOpening("2026-10-27", "06:00", "10:00");
+
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    const db = context.firestore();
+    await setDoc(doc(db, "companies/co1/openings/night"), night);
+    await setDoc(doc(db, "companies/co1/openings/early"), early);
+    await setDoc(doc(db, "companies/co1/openings/after"), after);
+  });
+
+  const first = writeBatch(employee);
+  first.update(doc(employee, "companies/co1/openings/night"), {
+    taken: 1,
+    heldSignupId: "co1_emp1~night",
+  });
+  first.set(doc(employee, "companies/co1/signups/co1_emp1~night"), selectedSignup("co1_emp1", "night"));
+  first.set(
+    doc(employee, "companies/co1/claims/co1_emp1"),
+    boundedClaim("co1_emp1", [
+      { shiftId: "night", date: "2026-10-26", startTime: "22:00", endTime: "06:00" },
+    ]),
+  );
+  await assertSucceeds(first.commit());
+
+  const overlap = writeBatch(employee);
+  overlap.update(doc(employee, "companies/co1/openings/early"), {
+    taken: 1,
+    heldSignupId: "co1_emp1~early",
+  });
+  overlap.set(doc(employee, "companies/co1/signups/co1_emp1~early"), selectedSignup("co1_emp1", "early"));
+  overlap.set(
+    doc(employee, "companies/co1/claims/co1_emp1"),
+    boundedClaim("co1_emp1", [
+      { shiftId: "night", date: "2026-10-26", startTime: "22:00", endTime: "06:00" },
+      { shiftId: "early", date: "2026-10-27", startTime: "01:00", endTime: "03:00" },
+    ]),
+  );
+  await assertFails(overlap.commit());
+
+  const adjacent = writeBatch(employee);
+  adjacent.update(doc(employee, "companies/co1/openings/after"), {
+    taken: 1,
+    heldSignupId: "co1_emp1~after",
+  });
+  adjacent.set(
+    doc(employee, "companies/co1/signups/co1_emp1~after"),
+    selectedSignup("co1_emp1", "after"),
+  );
+  adjacent.set(
+    doc(employee, "companies/co1/claims/co1_emp1"),
+    boundedClaim("co1_emp1", [
+      { shiftId: "night", date: "2026-10-26", startTime: "22:00", endTime: "06:00" },
+      { shiftId: "after", date: "2026-10-27", startTime: "06:00", endTime: "10:00" },
+    ]),
+  );
+  await assertSucceeds(adjacent.commit());
+});
+
+test("manager assignments share the claim ledger and cannot overlap", async () => {
+  const owner = testEnv.authenticatedContext("owner1", { email: "ada@cafe.test" }).firestore();
+  const employee = testEnv.authenticatedContext("emp1", { email: "sam@cafe.test" }).firestore();
+  const otherOwner = testEnv.authenticatedContext("owner2", { email: "other@cafe.test" }).firestore();
+  const signedOut = testEnv.unauthenticatedContext().firestore();
+  const night = boundedOpening("2026-10-26", "22:00", "06:00");
+  const early = boundedOpening("2026-10-27", "01:00", "03:00");
+  const after = boundedOpening("2026-10-27", "06:00", "10:00");
+
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    const db = context.firestore();
+    await setDoc(doc(db, "companies/co1/openings/assign-night"), night);
+    await setDoc(doc(db, "companies/co1/openings/assign-early"), early);
+    await setDoc(doc(db, "companies/co1/openings/assign-after"), after);
+  });
+
+  const assignment = (
+    shiftId: string,
+    date: string,
+    startTime: string,
+    endTime: string,
+  ) => {
+    const span = civilInterval(date, startTime, endTime);
+    assert.ok(span);
+    return {
+      employeeId: "co1_emp1",
+      shiftId,
+      date,
+      startTime,
+      endTime,
+      startMin: span.start,
+      endMin: span.end,
+    };
+  };
+
+  await assertFails(getDoc(doc(signedOut, "companies/co1/assignments/co1_emp1~assign-night")));
+  await assertFails(
+    setDoc(
+      doc(employee, "companies/co1/assignments/co1_emp1~assign-night"),
+      assignment("assign-night", "2026-10-26", "22:00", "06:00"),
+    ),
+  );
+  await assertFails(
+    setDoc(
+      doc(otherOwner, "companies/co1/assignments/co1_emp1~assign-night"),
+      assignment("assign-night", "2026-10-26", "22:00", "06:00"),
+    ),
+  );
+
+  const first = writeBatch(owner);
+  first.set(
+    doc(owner, "companies/co1/claims/co1_emp1"),
+    boundedClaim("co1_emp1", [
+      { shiftId: "assign-night", date: "2026-10-26", startTime: "22:00", endTime: "06:00" },
+    ]),
+  );
+  first.set(
+    doc(owner, "companies/co1/assignments/co1_emp1~assign-night"),
+    assignment("assign-night", "2026-10-26", "22:00", "06:00"),
+  );
+  await assertSucceeds(first.commit());
+
+  const overlap = writeBatch(owner);
+  overlap.set(
+    doc(owner, "companies/co1/claims/co1_emp1"),
+    boundedClaim("co1_emp1", [
+      { shiftId: "assign-night", date: "2026-10-26", startTime: "22:00", endTime: "06:00" },
+      { shiftId: "assign-early", date: "2026-10-27", startTime: "01:00", endTime: "03:00" },
+    ]),
+  );
+  overlap.set(
+    doc(owner, "companies/co1/assignments/co1_emp1~assign-early"),
+    assignment("assign-early", "2026-10-27", "01:00", "03:00"),
+  );
+  await assertFails(overlap.commit());
+
+  const adjacent = writeBatch(owner);
+  adjacent.set(
+    doc(owner, "companies/co1/claims/co1_emp1"),
+    boundedClaim("co1_emp1", [
+      { shiftId: "assign-night", date: "2026-10-26", startTime: "22:00", endTime: "06:00" },
+      { shiftId: "assign-after", date: "2026-10-27", startTime: "06:00", endTime: "10:00" },
+    ]),
+  );
+  adjacent.set(
+    doc(owner, "companies/co1/assignments/co1_emp1~assign-after"),
+    assignment("assign-after", "2026-10-27", "06:00", "10:00"),
+  );
+  await assertSucceeds(adjacent.commit());
 });

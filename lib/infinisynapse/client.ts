@@ -2,6 +2,7 @@ import {
   InfiniSynapseApiError,
   alternateInfiniSynapseBaseUrl,
   getInfiniSynapseBaseUrl,
+  infiniSynapseErrorKind,
   infiniSynapseHeaders,
   rememberInfiniSynapseBaseUrl,
 } from "@/lib/infinisynapse/config";
@@ -27,11 +28,12 @@ function networkCause(error: unknown): { code?: string; message?: string } | nul
   return cause && typeof cause === "object" ? cause : null;
 }
 
-function classifyCode(code: number | null, status: number): InfiniSynapseApiError["kind"] {
-  if (code === 1101 || code === 1105 || status === 401 || status === 403) {
-    return "invalid_credentials";
-  }
-  return "http";
+function classifyFailure(
+  message: string,
+  code: number | null,
+  status: number,
+): InfiniSynapseApiError["kind"] {
+  return infiniSynapseErrorKind(message, code, status);
 }
 
 async function parseBody(response: Response): Promise<unknown> {
@@ -100,31 +102,32 @@ async function infiniSynapseFetchAt<T>(
     const code = readCode(parsed);
 
     if (!response.ok) {
-      throw new InfiniSynapseApiError(
-        readMessage(parsed, `InfiniSynapse request failed (${response.status}).`),
-        {
-          status: response.status,
-          code,
-          kind: classifyCode(code, response.status),
-        },
-      );
+      const message = readMessage(parsed, `InfiniSynapse request failed (${response.status}).`);
+      throw new InfiniSynapseApiError(message, {
+        status: response.status,
+        code,
+        kind: classifyFailure(message, code, response.status),
+      });
     }
 
     if (code !== null && code !== 200) {
-      throw new InfiniSynapseApiError(readMessage(parsed, "InfiniSynapse request failed."), {
+      const message = readMessage(parsed, "InfiniSynapse request failed.");
+      throw new InfiniSynapseApiError(message, {
         status: response.status,
         code,
-        kind: classifyCode(code, response.status),
+        kind: classifyFailure(message, code, response.status),
       });
     }
 
     if (parsed && typeof parsed === "object" && "success" in parsed) {
       const envelope = parsed as Envelope<T>;
       if (envelope.success === false) {
-        throw new InfiniSynapseApiError(
-          readMessage(parsed, "InfiniSynapse rejected the request."),
-          { status: response.status, code, kind: classifyCode(code, response.status) },
-        );
+        const message = readMessage(parsed, "InfiniSynapse rejected the request.");
+        throw new InfiniSynapseApiError(message, {
+          status: response.status,
+          code,
+          kind: classifyFailure(message, code, response.status),
+        });
       }
     }
 

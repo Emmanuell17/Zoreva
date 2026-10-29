@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  decideAssignment,
   decideBooking,
   decideCancellation,
   decideConfirmation,
@@ -351,6 +352,102 @@ test("confirmation is idempotent and a missing signup is not confirmed", () => {
     signup: null,
   });
   assert.equal(missing.ok, false);
+});
+
+test("a stale assignment read would overlap, and a transaction keeps one", async () => {
+  const night = future(
+    opening({ shiftId: "night", date: "2026-10-26", startTime: "22:00", endTime: "06:00" }),
+  );
+  const early = future(
+    opening({ shiftId: "early", date: "2026-10-27", startTime: "01:00", endTime: "03:00" }),
+  );
+  const stale = (shift: OpeningState) =>
+    decideAssignment({
+      companyId: "co1",
+      memberCompanyId: "co1",
+      employeeId: "sam",
+      now: NOW,
+      opening: shift,
+      held: [],
+      alreadyAssigned: false,
+    });
+  assert.equal(stale(night).ok, true);
+  assert.equal(stale(early).ok, true);
+
+  const held = new Map<string, HeldShift[]>();
+  let chain: Promise<unknown> = Promise.resolve();
+  const assign = (shift: OpeningState) => {
+    const run = chain.then(() => {
+      const mine = held.get("sam") ?? [];
+      const decision = decideAssignment({
+        companyId: "co1",
+        memberCompanyId: "co1",
+        employeeId: "sam",
+        now: NOW,
+        opening: shift,
+        held: mine,
+        alreadyAssigned: mine.some((item) => item.shiftId === shift.shiftId),
+      });
+      if (decision.ok && decision.booking) held.set("sam", [...mine, decision.booking]);
+      return decision;
+    });
+    chain = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  };
+  const [first, second] = await Promise.all([assign(night), assign(early)]);
+  assert.equal([first.ok, second.ok].filter(Boolean).length, 1);
+  assert.equal(held.get("sam")?.length, 1);
+});
+
+test("an overnight shift overlaps a shift that starts the next calendar day", () => {
+  const seat: Seat = {
+    openings: new Map([
+      [
+        "night",
+        future(
+          opening({
+            shiftId: "night",
+            date: "2026-10-26",
+            startTime: "22:00",
+            endTime: "06:00",
+          }),
+        ),
+      ],
+      [
+        "early",
+        future(
+          opening({
+            shiftId: "early",
+            date: "2026-10-27",
+            startTime: "01:00",
+            endTime: "03:00",
+          }),
+        ),
+      ],
+      [
+        "after",
+        future(
+          opening({
+            shiftId: "after",
+            date: "2026-10-27",
+            startTime: "06:00",
+            endTime: "10:00",
+          }),
+        ),
+      ],
+    ]),
+    signups: new Map(),
+  };
+  assert.equal(applyBook(seat, "empA", "night").ok, true);
+  const overlap = applyBook(seat, "empA", "early");
+  assert.equal(overlap.ok, false);
+  if (!overlap.ok) assert.equal(overlap.code, "overlap");
+  assert.equal(seat.signups.size, 1);
+  assert.equal(applyBook(seat, "empA", "after").ok, true);
+  assert.equal(seat.signups.size, 2);
 });
 
 test("a finished shift cannot be booked", () => {

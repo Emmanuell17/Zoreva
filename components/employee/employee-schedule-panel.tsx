@@ -10,6 +10,7 @@ import { useCurrentEmployeeId } from "@/hooks/use-current-employee";
 import { useInitialLoading } from "@/hooks/use-initial-loading";
 import { useSchedule } from "@/hooks/use-schedule";
 import { useShiftCommand } from "@/hooks/use-shift-command";
+import { isPublishedShift } from "@/lib/rota/week";
 import { confirmShift, leaveShift } from "@/lib/services/schedule";
 import { isUpcomingShift, sortShifts } from "@/lib/shift-utils";
 import { getSignupStatusLabel } from "@/lib/utils";
@@ -36,14 +37,26 @@ export function EmployeeSchedulePanel() {
     });
   }
 
-  const mine = signups
+  const chosen = signups
     .filter((signup) => signup.employeeId === employeeId)
     .map((signup) => {
-      const shift = shifts.find((item) => item.id === signup.shiftId);
+      const shift = shifts.find(
+        (item) => item.id === signup.shiftId && isPublishedShift(item),
+      );
       if (!shift || !isUpcomingShift(shift)) return null;
       return { shift, signup };
     })
     .filter((item) => item !== null);
+  const planned = shifts
+    .filter(
+      (shift) =>
+        isPublishedShift(shift) &&
+        isUpcomingShift(shift) &&
+        (shift.assigneeIds ?? []).includes(employeeId) &&
+        !chosen.some((item) => item.shift.id === shift.id),
+    )
+    .map((shift) => ({ shift, signup: null }));
+  const mine = [...chosen, ...planned];
 
   const scheduled = sortShifts(mine.map((item) => item.shift)).map((shift) => {
     const row = mine.find((item) => item.shift.id === shift.id);
@@ -79,12 +92,13 @@ export function EmployeeSchedulePanel() {
             note={shift.note}
             badges={
               <Badge
-                variant={signup.status === "CONFIRMED" ? "confirmed" : "pending"}
+                variant={signup?.status === "CONFIRMED" ? "confirmed" : "pending"}
               >
-                {getSignupStatusLabel(signup.status)}
+                {signup ? getSignupStatusLabel(signup.status) : "You're scheduled"}
               </Badge>
             }
             actions={
+              signup ? (
               <>
                 {signup.status !== "CONFIRMED" ? (
                   <Button
@@ -107,6 +121,7 @@ export function EmployeeSchedulePanel() {
                   Leave shift
                 </Button>
               </>
+              ) : null
             }
           />
         ))}

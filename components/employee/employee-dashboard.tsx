@@ -18,6 +18,7 @@ import { useCurrentEmployeeId } from "@/hooks/use-current-employee";
 import { useInitialLoading } from "@/hooks/use-initial-loading";
 import { useSchedule } from "@/hooks/use-schedule";
 import { useShiftCommand } from "@/hooks/use-shift-command";
+import { isPublishedShift } from "@/lib/rota/week";
 import { confirmShift, submitHours } from "@/lib/services/schedule";
 import {
   hoursForSignup,
@@ -40,7 +41,9 @@ export function EmployeeDashboard() {
   const mine = signups.filter((signup) => signup.employeeId === employeeId);
   const myUpcoming = mine
     .map((signup) => {
-      const shift = shifts.find((item) => item.id === signup.shiftId);
+      const shift = shifts.find(
+        (item) => item.id === signup.shiftId && isPublishedShift(item),
+      );
       if (!shift || !isUpcomingShift(shift)) return null;
       return { shift, signup };
     })
@@ -53,7 +56,9 @@ export function EmployeeDashboard() {
 
   const hoursDue = mine
     .map((signup) => {
-      const shift = shifts.find((item) => item.id === signup.shiftId);
+      const shift = shifts.find(
+        (item) => item.id === signup.shiftId && isPublishedShift(item),
+      );
       if (!shift || !isPastShift(shift)) return null;
       if (hoursForSignup(hours, shift.id, employeeId)) return null;
       return { shift, signup };
@@ -63,6 +68,19 @@ export function EmployeeDashboard() {
   const confirmNow = myUpcoming.find((item) => item.signup.status !== "CONFIRMED");
   const hoursNow = hoursDue[0];
   const nextShift = myUpcoming[0];
+  const nextPlanned = shifts
+    .filter(
+      (shift) =>
+        isPublishedShift(shift) &&
+        isUpcomingShift(shift) &&
+        (shift.assigneeIds ?? []).includes(employeeId) &&
+        !myUpcoming.some((item) => item.shift.id === shift.id),
+    )
+    .sort(
+      (a, b) =>
+        new Date(a.date).getTime() - new Date(b.date).getTime() ||
+        a.startTime.localeCompare(b.startTime),
+    )[0];
 
   return (
     <div>
@@ -167,6 +185,29 @@ export function EmployeeDashboard() {
                 <Badge variant="confirmed">
                   {getSignupStatusLabel(nextShift.signup.status)}
                 </Badge>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <Link href="/employee/schedule" className="block w-full">
+                <Button variant="secondary" className="w-full">
+                  See my shifts
+                </Button>
+              </Link>
+            </CardContent>
+          </Card>
+        ) : nextPlanned ? (
+          <Card>
+            <CardHeader>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <CardTitle>You&apos;re on the schedule</CardTitle>
+                  <CardDescription>
+                    {formatDayLabel(nextPlanned.date)} ·{" "}
+                    {nextPlanned.label ?? "Shift"} ·{" "}
+                    {formatTimeRange(nextPlanned.startTime, nextPlanned.endTime)}
+                  </CardDescription>
+                </div>
+                <Badge variant="pending">You&apos;re scheduled</Badge>
               </div>
             </CardHeader>
             <CardContent>

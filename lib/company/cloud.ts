@@ -17,11 +17,16 @@ import { normalizeEmail } from "@/lib/company/email";
 import { normalizeJoinCode } from "@/lib/company/join-code";
 import {
   joinCodeIsCurrent,
+  draftRotaPayload,
   privateCompanyPayload,
   publishedSchedulePayload,
   rosterPayload,
 } from "@/lib/security/policy";
+import { mergeRota } from "@/lib/rota/week";
+import { civilInterval } from "@/lib/time/interval";
+import { DEFAULT_BUSINESS_TIMEZONE } from "@/lib/time/zoned";
 import {
+  decideAssignment,
   decideBooking,
   decideCancellation,
   decideConfirmation,
@@ -38,9 +43,11 @@ import type {
   Company,
   CompanyMembership,
   HoursEntry,
+  AvailabilityWindow,
   Shift,
   ShiftSignup,
   ShiftTemplate,
+  TimeOffRequest,
   User,
 } from "@/types";
 
@@ -186,6 +193,138 @@ function asShifts(value: unknown): Shift[] {
   return clone(value) as Shift[];
 }
 
+function availabilityFromDoc(id: string, data: Record<string, unknown>): AvailabilityWindow | null {
+  const employeeId = asString(data.employeeId);
+  const kind = data.kind === "date" ? "date" : data.kind === "recurring" ? "recurring" : null;
+  const startTime = asString(data.startTime);
+  const endTime = asString(data.endTime);
+  if (!employeeId || !kind || !startTime || !endTime || typeof data.available !== "boolean") return null;
+  const weekday = typeof data.weekday === "number" && data.weekday >= 0 && data.weekday <= 6 ? data.weekday : null;
+  const date = asString(data.date);
+  return {
+    id,
+    employeeId,
+    kind,
+    weekday: kind === "recurring" ? weekday : null,
+    date: kind === "date" && date ? date : null,
+    startTime,
+    endTime,
+    available: data.available,
+    note: asString(data.note) || null,
+    updatedAt: asString(data.updatedAt, new Date().toISOString()),
+  };
+}
+
+function timeOffFromDoc(id: string, data: Record<string, unknown>): TimeOffRequest | null {
+  const employeeId = asString(data.employeeId);
+  const startDate = asString(data.startDate);
+  const endDate = asString(data.endDate);
+  const status = data.status;
+  if (!employeeId || !startDate || !endDate) return null;
+  if (status !== "pending" && status !== "approved" && status !== "rejected") return null;
+  const startTime = asString(data.startTime);
+  const endTime = asString(data.endTime);
+  return {
+    id,
+    employeeId,
+    startDate,
+    endDate,
+    startTime: startTime || null,
+    endTime: endTime || null,
+    reason: asString(data.reason) || null,
+    status,
+    reviewNote: asString(data.reviewNote) || null,
+    createdAt: asString(data.createdAt, new Date().toISOString()),
+    reviewedAt: asString(data.reviewedAt) || null,
+  };
+}
+
+function availabilityPayload(window: AvailabilityWindow): Record<string, unknown> {
+  return {
+    employeeId: window.employeeId,
+    kind: window.kind,
+    weekday: window.kind === "recurring" && window.weekday !== null ? window.weekday : -1,
+    date: window.kind === "date" && window.date ? window.date : "",
+    startTime: window.startTime,
+    endTime: window.endTime,
+    available: window.available,
+    note: window.note ?? "",
+    updatedAt: window.updatedAt,
+  };
+}
+
+function timeOffPayload(request: TimeOffRequest): Record<string, unknown> {
+  return {
+    employeeId: request.employeeId,
+    startDate: request.startDate,
+    endDate: request.endDate,
+    startTime: request.startTime ?? "",
+    endTime: request.endTime ?? "",
+    reason: request.reason ?? "",
+    status: request.status,
+    reviewNote: request.reviewNote ?? "",
+    createdAt: request.createdAt,
+    reviewedAt: request.reviewedAt ?? "",
+  };
+}
+
+async function readStaffing(
+  companyId: string,
+  employeeId?: string,
+): Promise<{ availability: AvailabilityWindow[]; timeOff: TimeOffRequest[] }> {
+  const empty = { availability: [] as AvailabilityWindow[], timeOff: [] as TimeOffRequest[] };
+  if (!canUseFirestore()) return empty;
+  try {
+    const db = getFirebaseFirestore();
+    const availabilityQuery = employeeId
+      ? query(collection(db, "companies", companyId, "availability"), where("employeeId", "==", employeeId))
+      : collection(db, "companies", companyId, "availability");
+    const timeOffQuery = employeeId
+      ? query(collection(db, "companies", companyId, "timeOff"), where("employeeId", "==", employeeId))
+      : collection(db, "companies", companyId, "timeOff");
+    const [availabilitySnap, timeOffSnap] = await Promise.all([
+      getDocs(availabilityQuery),
+      getDocs(timeOffQuery),
+    ]);
+    return {
+      availability: availabilitySnap.docs
+        .map((item) => availabilityFromDoc(item.id, asRecord(item.data())))
+        .filter((item): item is AvailabilityWindow => Boolean(item)),
+      timeOff: timeOffSnap.docs
+        .map((item) => timeOffFromDoc(item.id, asRecord(item.data())))
+        .filter((item): item is TimeOffRequest => Boolean(item)),
+    };
+  } catch {
+    return empty;
+  }
+}
+
+export async function saveAvailabilityRemote(companyId: string, window: AvailabilityWindow): Promise<void> {
+  if (!canUseFirestore()) return;
+  await setDoc(
+    doc(getFirebaseFirestore(), "companies", companyId, "availability", window.id),
+    availabilityPayload(window),
+  );
+}
+
+export async function deleteAvailabilityRemote(companyId: string, windowId: string): Promise<void> {
+  if (!canUseFirestore()) return;
+  await deleteDoc(doc(getFirebaseFirestore(), "companies", companyId, "availability", windowId));
+}
+
+export async function saveTimeOffRemote(companyId: string, request: TimeOffRequest): Promise<void> {
+  if (!canUseFirestore()) return;
+  await setDoc(
+    doc(getFirebaseFirestore(), "companies", companyId, "timeOff", request.id),
+    timeOffPayload(request),
+  );
+}
+
+export async function deleteTimeOffRemote(companyId: string, requestId: string): Promise<void> {
+  if (!canUseFirestore()) return;
+  await deleteDoc(doc(getFirebaseFirestore(), "companies", companyId, "timeOff", requestId));
+}
+
 function asTemplates(value: unknown): ShiftTemplate[] {
   if (!Array.isArray(value)) return [];
   return clone(value) as ShiftTemplate[];
@@ -209,6 +348,42 @@ export type ManagerLoad = {
   legacy: boolean;
 };
 
+function applyAssignmentDocs(
+  shifts: Shift[],
+  assignments: { shiftId: string; employeeId: string }[],
+): Shift[] {
+  const byShift = new Map<string, string[]>();
+  for (const item of assignments) {
+    const list = byShift.get(item.shiftId) ?? [];
+    if (!list.includes(item.employeeId)) list.push(item.employeeId);
+    byShift.set(item.shiftId, list);
+  }
+  if (byShift.size === 0) return shifts;
+  return shifts.map((shift) => {
+    const saved = byShift.get(shift.id);
+    if (!saved) return shift;
+    return { ...shift, assigneeIds: saved };
+  });
+}
+
+async function readAssignments(
+  companyId: string,
+): Promise<{ shiftId: string; employeeId: string }[]> {
+  try {
+    const snap = await getDocs(
+      collection(getFirebaseFirestore(), "companies", companyId, "assignments"),
+    );
+    return snap.docs.flatMap((item) => {
+      const data = asRecord(item.data());
+      const shiftId = asString(data.shiftId);
+      const employeeId = asString(data.employeeId);
+      return shiftId && employeeId ? [{ shiftId, employeeId }] : [];
+    });
+  } catch {
+    return [];
+  }
+}
+
 function companyFromParts(input: {
   companyId: string;
   profile: Record<string, unknown> | null;
@@ -216,7 +391,11 @@ function companyFromParts(input: {
   roster: User[];
   signups: ShiftSignup[];
   hours: HoursEntry[];
+  draftShifts?: Shift[];
+  availability?: AvailabilityWindow[];
+  timeOff?: TimeOffRequest[];
   legacyEmployees?: User[];
+  assignments?: { shiftId: string; employeeId: string }[];
 }): Company {
   const profile = input.profile ?? {};
   const schedule = input.schedule ?? {};
@@ -233,10 +412,16 @@ function companyFromParts(input: {
       typeof profile.employeeCount === "number" ? profile.employeeCount : employees.length,
     shiftTemplates: asTemplates(schedule.shiftTemplates ?? profile.shiftTemplates),
     employees,
-    shifts: asShifts(schedule.shifts ?? profile.shifts),
+    shifts: applyAssignmentDocs(
+      mergeRota(asShifts(schedule.shifts ?? profile.shifts), input.draftShifts ?? []),
+      input.assignments ?? [],
+    ),
     signups: input.signups,
     hours: input.hours,
+    availability: input.availability ?? [],
+    timeOff: input.timeOff ?? [],
     setupCompletedAt: asString(profile.setupCompletedAt, new Date().toISOString()),
+    ...(asString(profile.timezone) ? { timezone: asString(profile.timezone) } : {}),
   };
 }
 
@@ -278,7 +463,17 @@ export async function loadManagerCompanyRemote(
     const legacyEmployees = Array.isArray(profile.employees)
       ? (clone(profile.employees) as User[])
       : [];
+    let draftShifts: Shift[] = [];
+    try {
+      const draftSnap = await getDoc(doc(db, "companies", companyId, "drafts", "rota"));
+      if (draftSnap.exists()) {
+        draftShifts = asShifts(asRecord(draftSnap.data()).shifts);
+      }
+    } catch {
+      draftShifts = [];
+    }
 
+    const staffing = await readStaffing(companyId);
     return {
       legacy: profileIsLegacy(profile) || !scheduleSnap?.exists(),
       company: companyFromParts({
@@ -287,10 +482,14 @@ export async function loadManagerCompanyRemote(
         schedule: scheduleSnap?.exists() ? asRecord(scheduleSnap.data()) : null,
         roster,
         legacyEmployees,
+        draftShifts,
+        availability: staffing.availability,
+        timeOff: staffing.timeOff,
         signups: (signupSnap?.docs ?? []).map((item) =>
           signupFromDoc(item.id, asRecord(item.data())),
         ),
         hours: (hoursSnap?.docs ?? []).map((item) => hoursFromDoc(item.id, asRecord(item.data()))),
+        assignments: await readAssignments(companyId),
       }),
     };
   } catch {
@@ -326,6 +525,7 @@ export async function loadEmployeeCompanyRemote(
       userFromRoster(asRecord(item.data()), item.id === employeeId ? ownEmail : ""),
     );
 
+    const staffing = await readStaffing(companyId, employeeId);
     return companyFromParts({
       companyId,
       profile: null,
@@ -333,6 +533,9 @@ export async function loadEmployeeCompanyRemote(
       roster,
       signups: signupSnap.docs.map((item) => signupFromDoc(item.id, asRecord(item.data()))),
       hours: hoursSnap.docs.map((item) => hoursFromDoc(item.id, asRecord(item.data()))),
+      availability: staffing.availability,
+      timeOff: staffing.timeOff,
+      assignments: await readAssignments(companyId),
     });
   } catch {
     return null;
@@ -376,7 +579,13 @@ export async function createManagerWorkspaceRemote(
   });
   await batch.commit();
   await writeRoster(company);
-  await syncShiftOpeningsRemote(company.id, company.shifts, company.signups);
+  await syncShiftOpeningsRemote(
+    company.id,
+    company.shifts.filter((shift) => shift.status !== "draft"),
+    company.signups,
+    company.timezone,
+  );
+  await saveDraftRotaRemote(company);
 }
 
 export async function ensureOwnerMembershipRemote(company: Company): Promise<void> {
@@ -422,7 +631,25 @@ export async function migrateManagerWorkspaceRemote(
       // A missing or already removed code should not block the new one.
     }
   }
-  await syncShiftOpeningsRemote(company.id, company.shifts, company.signups);
+  await syncShiftOpeningsRemote(
+    company.id,
+    company.shifts.filter((shift) => shift.status !== "draft"),
+    company.signups,
+    company.timezone,
+  );
+  await saveDraftRotaRemote(company);
+}
+
+async function saveDraftRotaRemote(company: Company): Promise<void> {
+  if (!canUseFirestore()) return;
+  try {
+    await setDoc(
+      doc(getFirebaseFirestore(), "companies", company.id, "drafts", "rota"),
+      clone(draftRotaPayload(company)),
+    );
+  } catch {
+    // A missing rules deploy should not undo the published rota.
+  }
 }
 
 async function writeRoster(company: Company): Promise<void> {
@@ -457,7 +684,13 @@ export async function updatePublishedScheduleRemote(company: Company): Promise<v
     doc(getFirebaseFirestore(), "companies", company.id, "published", "schedule"),
     clone(publishedSchedulePayload(company)),
   );
-  await syncShiftOpeningsRemote(company.id, company.shifts, company.signups);
+  await syncShiftOpeningsRemote(
+    company.id,
+    company.shifts.filter((shift) => shift.status !== "draft"),
+    company.signups,
+    company.timezone,
+  );
+  await saveDraftRotaRemote(company);
 }
 
 export class JoinFailed extends Error {
@@ -587,6 +820,7 @@ export async function syncShiftOpeningsRemote(
   companyId: string,
   shifts: Shift[],
   signups: { shiftId: string }[] = [],
+  timeZone: string = DEFAULT_BUSINESS_TIMEZONE,
 ): Promise<void> {
   if (!canUseFirestore() || shifts.length === 0) return;
   const db = getFirebaseFirestore();
@@ -600,17 +834,25 @@ export async function syncShiftOpeningsRemote(
       await runTransaction(db, async (transaction) => {
         const snap = await transaction.get(ref);
         if (!snap.exists()) {
-          transaction.set(ref, openingWrite(openingFromShift(shift, knownTaken), ""));
+          transaction.set(ref, openingWrite(openingFromShift(shift, knownTaken, timeZone), ""));
           return;
         }
         const current = readOpening(shift.id, asRecord(snap.data()));
-        const opening = openingFromShift(shift, current?.taken ?? 0);
+        const opening = openingFromShift(shift, current?.taken ?? 0, timeZone);
+        const sameClock =
+          current?.date === opening.date &&
+          current.startTime === opening.startTime &&
+          current.endTime === opening.endTime;
         transaction.update(ref, {
           slots: opening.slots,
           date: opening.date,
           startTime: opening.startTime,
           endTime: opening.endTime,
-          endAt: opening.endAt,
+          endAt: sameClock && current ? current.endAt : opening.endAt,
+          ...(sameClock ? {} : { timeZone: opening.timeZone ?? timeZone }),
+          ...(opening.startMin !== undefined && opening.endMin !== undefined
+            ? { startMin: opening.startMin, endMin: opening.endMin }
+            : {}),
         });
       });
     }
@@ -630,13 +872,115 @@ function readClaimBookings(data: Record<string, unknown> | null): HeldShift[] | 
     const startTime = asString(record.startTime);
     const endTime = asString(record.endTime);
     if (!shiftId || !date || !startTime || !endTime) return null;
-    bookings.push({ shiftId, date, startTime, endTime });
+    const startMin = record.startMin;
+    const endMin = record.endMin;
+    bookings.push({
+      shiftId,
+      date,
+      startTime,
+      endTime,
+      ...(typeof startMin === "number" &&
+      typeof endMin === "number" &&
+      Number.isInteger(startMin) &&
+      Number.isInteger(endMin)
+        ? { startMin, endMin }
+        : {}),
+    });
   }
   return bookings;
 }
 
 function ownsSignup(data: Record<string, unknown>, employeeId: string, shiftId: string): boolean {
   return asString(data.employeeId) === employeeId && asString(data.shiftId) === shiftId;
+}
+
+export async function assignEmployeeRemote(
+  companyId: string,
+  employeeId: string,
+  shiftId: string,
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  if (!canUseFirestore()) return { ok: false, reason: "Could not save that assignment." };
+  const assignmentId = signupDocumentId(employeeId, shiftId);
+  if (!assignmentId) return { ok: false, reason: "Choose a person from your team." };
+  const db = getFirebaseFirestore();
+  try {
+    return await runTransaction(db, async (transaction) => {
+      const openingRef = doc(db, "companies", companyId, "openings", shiftId);
+      const claimRef = doc(db, "companies", companyId, "claims", employeeId);
+      const assignmentRef = doc(db, "companies", companyId, "assignments", assignmentId);
+      const openingSnap = await transaction.get(openingRef);
+      const claimSnap = await transaction.get(claimRef);
+      const assignmentSnap = await transaction.get(assignmentRef);
+      const opening = readOpening(shiftId, openingSnap.exists() ? asRecord(openingSnap.data()) : null);
+      if (opening && (opening.startMin === undefined || opening.endMin === undefined)) {
+        const span = civilInterval(opening.date, opening.startTime, opening.endTime);
+        if (span) {
+          opening.startMin = span.start;
+          opening.endMin = span.end;
+          transaction.update(openingRef, { startMin: span.start, endMin: span.end });
+        }
+      }
+      const claimed = readClaimBookings(claimSnap.exists() ? asRecord(claimSnap.data()) : null);
+      if (!claimed) {
+        return { ok: false as const, reason: "Could not check that person's other shifts. Try again." };
+      }
+      const decision = decideAssignment({
+        companyId,
+        memberCompanyId: companyId,
+        employeeId,
+        now: Date.now(),
+        opening,
+        held: claimed,
+        alreadyAssigned:
+          assignmentSnap.exists() || claimed.some((booking) => booking.shiftId === shiftId),
+      });
+      if (!decision.ok) return { ok: false as const, reason: decision.reason };
+      if (decision.alreadyAssigned || !decision.booking) return { ok: true as const };
+      transaction.set(claimRef, {
+        employeeId,
+        bookings: [...claimed, decision.booking],
+      });
+      transaction.set(assignmentRef, { employeeId, ...decision.booking });
+      return { ok: true as const };
+    });
+  } catch {
+    return {
+      ok: false,
+      reason: "That assignment conflicts with another shift, or it could not be saved. Look at the rota and try again.",
+    };
+  }
+}
+
+export async function releaseAssignmentRemote(
+  companyId: string,
+  employeeId: string,
+  shiftId: string,
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  if (!canUseFirestore()) return { ok: false, reason: "Could not remove that assignment." };
+  const assignmentId = signupDocumentId(employeeId, shiftId);
+  if (!assignmentId) return { ok: false, reason: "That shift is no longer available." };
+  const db = getFirebaseFirestore();
+  try {
+    return await runTransaction(db, async (transaction) => {
+      const claimRef = doc(db, "companies", companyId, "claims", employeeId);
+      const assignmentRef = doc(db, "companies", companyId, "assignments", assignmentId);
+      const claimSnap = await transaction.get(claimRef);
+      const assignmentSnap = await transaction.get(assignmentRef);
+      const claimed = readClaimBookings(claimSnap.exists() ? asRecord(claimSnap.data()) : null);
+      if (!claimed) {
+        return { ok: false as const, reason: "Could not update that assignment. Try again." };
+      }
+      const next = claimed.filter((booking) => booking.shiftId !== shiftId);
+      if (!assignmentSnap.exists() && next.length === claimed.length) return { ok: true as const };
+      if (assignmentSnap.exists()) transaction.delete(assignmentRef);
+      if (claimSnap.exists() && next.length !== claimed.length) {
+        transaction.set(claimRef, { employeeId, bookings: next });
+      }
+      return { ok: true as const };
+    });
+  } catch {
+    return { ok: false, reason: "Could not remove that assignment. Try again." };
+  }
 }
 
 export async function bookShiftRemote(
@@ -768,6 +1112,9 @@ export async function bookShiftRemote(
             date: opening.date,
             startTime: opening.startTime,
             endTime: opening.endTime,
+            ...(opening.startMin !== undefined && opening.endMin !== undefined
+              ? { startMin: opening.startMin, endMin: opening.endMin }
+              : {}),
           },
         ],
       });
@@ -932,10 +1279,17 @@ export async function syncEmployeeActivityRemote(
 type WatchParts = {
   profile: Record<string, unknown> | null;
   schedule: Record<string, unknown> | null;
+  drafts: Shift[];
+  draftsLoaded: boolean;
   roster: User[];
   signups: ShiftSignup[];
   hours: HoursEntry[];
+  availability: AvailabilityWindow[];
+  timeOff: TimeOffRequest[];
+  availabilityLoaded: boolean;
+  timeOffLoaded: boolean;
   emails: Map<string, string>;
+  assignments: { shiftId: string; employeeId: string }[];
 };
 
 export function watchManagerWorkspace(
@@ -947,14 +1301,21 @@ export function watchManagerWorkspace(
   const parts: WatchParts = {
     profile: null,
     schedule: null,
+    drafts: [],
+    draftsLoaded: false,
     roster: [],
     signups: [],
     hours: [],
+    availability: [],
+    timeOff: [],
+    availabilityLoaded: false,
+    timeOffLoaded: false,
     emails: new Map(),
+    assignments: [],
   };
 
   const emit = () => {
-    if (!parts.profile) return;
+    if (!parts.profile || !parts.draftsLoaded || !parts.availabilityLoaded || !parts.timeOffLoaded) return;
     const roster = parts.roster.map((employee) => ({
       ...employee,
       email: parts.emails.get(employee.id) ?? employee.email,
@@ -964,9 +1325,13 @@ export function watchManagerWorkspace(
         companyId,
         profile: parts.profile,
         schedule: parts.schedule,
+        draftShifts: parts.drafts,
         roster,
         signups: parts.signups,
         hours: parts.hours,
+        availability: parts.availability,
+        timeOff: parts.timeOff,
+        assignments: parts.assignments,
       }),
     );
   };
@@ -988,6 +1353,19 @@ export function watchManagerWorkspace(
         emit();
       },
       () => undefined,
+    ),
+    onSnapshot(
+      doc(db, "companies", companyId, "drafts", "rota"),
+      (snap) => {
+        parts.drafts = snap.exists() ? asShifts(asRecord(snap.data()).shifts) : [];
+        parts.draftsLoaded = true;
+        emit();
+      },
+      () => {
+        parts.drafts = [];
+        parts.draftsLoaded = true;
+        emit();
+      },
     ),
     onSnapshot(
       collection(db, "companies", companyId, "roster"),
@@ -1014,6 +1392,36 @@ export function watchManagerWorkspace(
       () => undefined,
     ),
     onSnapshot(
+      collection(db, "companies", companyId, "availability"),
+      (snap) => {
+        parts.availability = snap.docs
+          .map((item) => availabilityFromDoc(item.id, asRecord(item.data())))
+          .filter((item): item is AvailabilityWindow => Boolean(item));
+        parts.availabilityLoaded = true;
+        emit();
+      },
+      () => {
+        parts.availability = [];
+        parts.availabilityLoaded = true;
+        emit();
+      },
+    ),
+    onSnapshot(
+      collection(db, "companies", companyId, "timeOff"),
+      (snap) => {
+        parts.timeOff = snap.docs
+          .map((item) => timeOffFromDoc(item.id, asRecord(item.data())))
+          .filter((item): item is TimeOffRequest => Boolean(item));
+        parts.timeOffLoaded = true;
+        emit();
+      },
+      () => {
+        parts.timeOff = [];
+        parts.timeOffLoaded = true;
+        emit();
+      },
+    ),
+    onSnapshot(
       collection(db, "companies", companyId, "directory"),
       (snap) => {
         parts.emails = new Map();
@@ -1024,6 +1432,22 @@ export function watchManagerWorkspace(
         emit();
       },
       () => undefined,
+    ),
+    onSnapshot(
+      collection(db, "companies", companyId, "assignments"),
+      (snap) => {
+        parts.assignments = snap.docs.flatMap((item) => {
+          const data = asRecord(item.data());
+          const shiftId = asString(data.shiftId);
+          const employeeId = asString(data.employeeId);
+          return shiftId && employeeId ? [{ shiftId, employeeId }] : [];
+        });
+        emit();
+      },
+      () => {
+        parts.assignments = [];
+        emit();
+      },
     ),
   ];
 
@@ -1042,14 +1466,21 @@ export function watchEmployeeWorkspace(
   const parts: WatchParts = {
     profile: null,
     schedule: null,
+    drafts: [],
+    draftsLoaded: true,
     roster: [],
     signups: [],
     hours: [],
+    availability: [],
+    timeOff: [],
+    availabilityLoaded: false,
+    timeOffLoaded: false,
     emails: new Map(),
+    assignments: [],
   };
 
   const emit = () => {
-    if (!parts.schedule) return;
+    if (!parts.schedule || !parts.availabilityLoaded || !parts.timeOffLoaded) return;
     onCompany(
       companyFromParts({
         companyId,
@@ -1061,6 +1492,9 @@ export function watchEmployeeWorkspace(
         })),
         signups: parts.signups,
         hours: parts.hours.filter((entry) => entry.employeeId === employeeId),
+        availability: parts.availability,
+        timeOff: parts.timeOff,
+        assignments: parts.assignments,
       }),
     );
   };
@@ -1103,6 +1537,42 @@ export function watchEmployeeWorkspace(
       () => undefined,
     ),
     onSnapshot(
+      query(
+        collection(db, "companies", companyId, "availability"),
+        where("employeeId", "==", employeeId),
+      ),
+      (snap) => {
+        parts.availability = snap.docs
+          .map((item) => availabilityFromDoc(item.id, asRecord(item.data())))
+          .filter((item): item is AvailabilityWindow => Boolean(item));
+        parts.availabilityLoaded = true;
+        emit();
+      },
+      () => {
+        parts.availability = [];
+        parts.availabilityLoaded = true;
+        emit();
+      },
+    ),
+    onSnapshot(
+      query(
+        collection(db, "companies", companyId, "timeOff"),
+        where("employeeId", "==", employeeId),
+      ),
+      (snap) => {
+        parts.timeOff = snap.docs
+          .map((item) => timeOffFromDoc(item.id, asRecord(item.data())))
+          .filter((item): item is TimeOffRequest => Boolean(item));
+        parts.timeOffLoaded = true;
+        emit();
+      },
+      () => {
+        parts.timeOff = [];
+        parts.timeOffLoaded = true;
+        emit();
+      },
+    ),
+    onSnapshot(
       doc(db, "companies", companyId, "directory", employeeId),
       (snap) => {
         if (snap.exists() && typeof snap.data().email === "string") {
@@ -1111,6 +1581,22 @@ export function watchEmployeeWorkspace(
         emit();
       },
       () => undefined,
+    ),
+    onSnapshot(
+      collection(db, "companies", companyId, "assignments"),
+      (snap) => {
+        parts.assignments = snap.docs.flatMap((item) => {
+          const data = asRecord(item.data());
+          const shiftId = asString(data.shiftId);
+          const personId = asString(data.employeeId);
+          return shiftId && personId ? [{ shiftId, employeeId: personId }] : [];
+        });
+        emit();
+      },
+      () => {
+        parts.assignments = [];
+        emit();
+      },
     ),
   ];
 

@@ -1,4 +1,6 @@
-import { calendarDayKey, shiftDateTime, timesOverlap } from "@/lib/shift-utils";
+import { calendarDayKey } from "@/lib/shift-utils";
+import { civilInterval, shiftsOverlap } from "@/lib/time/interval";
+import { DEFAULT_BUSINESS_TIMEZONE, shiftEndUtc } from "@/lib/time/zoned";
 
 /**
  * Saved booking model:
@@ -7,8 +9,10 @@ import { calendarDayKey, shiftDateTime, timesOverlap } from "@/lib/shift-utils";
  * The signup id is derived from the employee and shift, so a retry finds the
  * same assignment instead of creating another one.
  * taken changes only together with that signup being created or deleted.
- * An overlap is another signup for the same employee whose opening covers
- * the same day and crosses these times.
+ * An overlap is another signup whose wall-clock interval crosses this one,
+ * including a shift that starts the day before and ends after midnight.
+ * Rules compare the stored startMin/endMin on the claim. Older claims
+ * without those numbers still use a same-day clock comparison.
  */
 
 export const MAX_TRACKED_SHIFTS = 40;
@@ -22,6 +26,9 @@ export type OpeningState = {
   startTime: string;
   endTime: string;
   endAt: number;
+  startMin?: number;
+  endMin?: number;
+  timeZone?: string;
 };
 
 export type HeldShift = {
@@ -29,6 +36,8 @@ export type HeldShift = {
   date: string;
   startTime: string;
   endTime: string;
+  startMin?: number;
+  endMin?: number;
 };
 
 export type BookedSignup = {
@@ -72,17 +81,24 @@ export function openingFromShift(
     slots: number;
   },
   taken: number,
+  timeZone: string = DEFAULT_BUSINESS_TIMEZONE,
 ): OpeningState {
   const counted = Math.max(0, Math.trunc(taken) || 0);
   const requested = Math.max(1, Math.trunc(shift.slots) || 1);
+  const date = calendarDayKey(shift.date);
+  const span = civilInterval(date, shift.startTime, shift.endTime);
+  const zone = timeZone || DEFAULT_BUSINESS_TIMEZONE;
+  const endAt = shiftEndUtc(date, shift.startTime, shift.endTime, zone) ?? 0;
   return {
     shiftId: shift.id,
     slots: Math.max(requested, counted),
     taken: counted,
-    date: calendarDayKey(shift.date),
+    date,
     startTime: shift.startTime,
     endTime: shift.endTime,
-    endAt: shiftDateTime(shift, "end").getTime(),
+    endAt,
+    timeZone: zone,
+    ...(span ? { startMin: span.start, endMin: span.end } : {}),
   };
 }
 
@@ -110,7 +126,28 @@ export function readOpening(
   ) {
     return null;
   }
-  return { shiftId, slots, taken, date, startTime, endTime, endAt };
+  const startMin = data.startMin;
+  const endMin = data.endMin;
+  const timeZone = data.timeZone;
+  const bounds =
+    typeof startMin === "number" &&
+    typeof endMin === "number" &&
+    Number.isInteger(startMin) &&
+    Number.isInteger(endMin) &&
+    endMin > startMin
+      ? { startMin, endMin }
+      : {};
+  return {
+    shiftId,
+    slots,
+    taken,
+    date,
+    startTime,
+    endTime,
+    endAt,
+    ...bounds,
+    ...(typeof timeZone === "string" && timeZone ? { timeZone } : {}),
+  };
 }
 
 export function openingWrite(
@@ -125,6 +162,10 @@ export function openingWrite(
     endTime: opening.endTime,
     endAt: opening.endAt,
     heldSignupId,
+    ...(opening.startMin !== undefined && opening.endMin !== undefined
+      ? { startMin: opening.startMin, endMin: opening.endMin }
+      : {}),
+    ...(opening.timeZone ? { timeZone: opening.timeZone } : {}),
   };
 }
 
@@ -201,17 +242,17 @@ export function decideBooking(input: {
       reason: "You have too many saved shifts to book another right now.",
     };
   }
-  const overlaps = input.held.some(
-    (other) =>
-      other.shiftId !== input.shiftId &&
-      other.date === input.opening?.date &&
-      timesOverlap(
-        input.opening.startTime,
-        input.opening.endTime,
-        other.startTime,
-        other.endTime,
-      ),
-  );
+  const overlaps = input.held.some((other) => {
+    if (other.shiftId === input.shiftId || !input.opening) return false;
+    return shiftsOverlap(
+      {
+        date: input.opening.date,
+        startTime: input.opening.startTime,
+        endTime: input.opening.endTime,
+      },
+      other,
+    );
+  });
   if (overlaps) {
     return {
       ok: false,
@@ -296,4 +337,69 @@ export function decideConfirmation(input: {
     return { ok: false, code: "past", reason: "This shift has already finished." };
   }
   return { ok: true, alreadyConfirmed: false };
+}
+
+export function decideAssignment(input: {
+  companyId: string;
+  memberCompanyId: string;
+  employeeId: string;
+  now: number;
+  opening: OpeningState | null;
+  held: HeldShift[];
+  alreadyAssigned: boolean;
+}): { ok: true; alreadyAssigned: boolean; booking: HeldShift | null } | BookingFailure {
+  if (!input.companyId || input.companyId !== input.memberCompanyId) {
+    return {
+      ok: false,
+      code: "wrong-company",
+      reason: "You can only change shifts for your own company.",
+    };
+  }
+  if (!input.employeeId) {
+    return { ok: false, code: "invalid", reason: "Choose a person from your team." };
+  }
+  if (input.alreadyAssigned) return { ok: true, alreadyAssigned: true, booking: null };
+  if (!input.opening) {
+    return { ok: false, code: "missing", reason: "Publish this shift before assigning someone." };
+  }
+  if (input.opening.endAt <= input.now) {
+    return { ok: false, code: "past", reason: "This shift has already finished." };
+  }
+  if (input.held.length >= MAX_CLAIMED_SHIFTS) {
+    return {
+      ok: false,
+      code: "invalid",
+      reason: "That person has too many saved shifts to assign another right now.",
+    };
+  }
+  const overlaps = input.held.some((other) => {
+    if (!input.opening || other.shiftId === input.opening.shiftId) return false;
+    return shiftsOverlap(input.opening, other);
+  });
+  if (overlaps) {
+    return {
+      ok: false,
+      code: "overlap",
+      reason: "That person is already on another shift at this time.",
+    };
+  }
+  if (input.opening.startMin === undefined || input.opening.endMin === undefined) {
+    return {
+      ok: false,
+      code: "invalid",
+      reason: "This shift is missing its time bounds. Save the rota and try again.",
+    };
+  }
+  return {
+    ok: true,
+    alreadyAssigned: false,
+    booking: {
+      shiftId: input.opening.shiftId,
+      date: input.opening.date,
+      startTime: input.opening.startTime,
+      endTime: input.opening.endTime,
+      startMin: input.opening.startMin,
+      endMin: input.opening.endMin,
+    },
+  };
 }

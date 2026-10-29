@@ -12,7 +12,6 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { useAuth } from "@/components/auth/auth-provider";
-import { EmptyState } from "@/components/ui/empty-state";
 import type { AdvisorJobPublic } from "@/lib/advisor/types";
 
 type HealthResponse = {
@@ -21,11 +20,21 @@ type HealthResponse = {
   error?: string;
 };
 
-function badgeForStatus(status: AdvisorJobPublic["status"]) {
-  if (status === "completed") return "success" as const;
-  if (status === "failed") return "warning" as const;
-  if (status === "running") return "pending" as const;
-  return "default" as const;
+function isBusyMessage(error: string | null | undefined): boolean {
+  return Boolean(error && (/busy/i.test(error) || /服务器繁忙/.test(error)));
+}
+
+function formatBytes(size: number): string {
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${Math.max(1, Math.round(size / 1024))} KB`;
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function statusCopy(job: AdvisorJobPublic): { label: string; variant: "success" | "warning" | "pending" | "default" } {
+  if (job.status === "completed") return { label: "Complete", variant: "success" };
+  if (job.status === "running" || job.status === "queued") return { label: "Running", variant: "pending" };
+  if (isBusyMessage(job.error)) return { label: "Compute busy", variant: "warning" };
+  return { label: "Needs another try", variant: "warning" };
 }
 
 export function AdminAdvisorPanel() {
@@ -35,9 +44,12 @@ export function AdminAdvisorPanel() {
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
 
   const signedIn = Boolean(configured && user);
+  const busy = submitting || job?.status === "queued" || job?.status === "running";
 
   useEffect(() => {
     if (!signedIn || !user) return;
@@ -67,8 +79,12 @@ export function AdminAdvisorPanel() {
     };
   }, [signedIn, user]);
 
-  async function handleSubmit(event: React.FormEvent) {
-    event.preventDefault();
+  function chooseFile(next: File | null) {
+    setFile(next);
+    setError(null);
+  }
+
+  async function startAnalysis() {
     setError(null);
     if (!file) {
       setError("Choose a CSV or Excel file first.");
@@ -106,8 +122,8 @@ export function AdminAdvisorPanel() {
       }
       await readAdvisorStream(response.body, setJob);
       setJob((current) => failIfUnfinished(current, "The analysis stopped before it finished."));
-    } catch (error) {
-      const cancelled = error instanceof Error && error.name === "AbortError";
+    } catch (caught) {
+      const cancelled = caught instanceof Error && caught.name === "AbortError";
       setJob((current) =>
         failIfUnfinished(
           current,
@@ -123,141 +139,336 @@ export function AdminAdvisorPanel() {
     }
   }
 
+  function handleSubmit(event: React.FormEvent) {
+    event.preventDefault();
+    void startAnalysis();
+  }
+
   function handleCancel() {
     setJob((current) => failIfUnfinished(current, "The analysis was cancelled."));
     setSubmitting(false);
     abortRef.current?.abort();
   }
 
-  const busy = submitting || job?.status === "queued" || job?.status === "running";
+  const connection = connectionState({ signedIn, health });
 
   return (
-    <div>
+    <div className="flex flex-col gap-6">
       <PageHeader
         title="Operations advisor"
-        description="Upload a workforce CSV or Excel file. InfiniSynapse reads it for missing, inconsistent, and staffing issues. Zoreva still owns booking rules and the real schedule."
+        description="Drop in a roster or hours export. Zoreva checks the rows immediately. InfiniSynapse adds advisory findings and does not change the schedule."
+        actions={<ConnectionPill state={connection} />}
       />
 
-      {!signedIn ? (
-        <p
-          role="status"
-          className="mb-4 rounded-md border border-amber-900/80 bg-amber-950/50 px-3 py-2 text-xs leading-relaxed text-amber-200"
+      <form onSubmit={handleSubmit} className="grid gap-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(16rem,0.8fr)]">
+        <label
+          onDragOver={(event) => {
+            event.preventDefault();
+            if (!busy) setDragOver(true);
+          }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={(event) => {
+            event.preventDefault();
+            setDragOver(false);
+            if (busy) return;
+            chooseFile(event.dataTransfer.files?.[0] ?? null);
+          }}
+          className={`group relative flex min-h-52 cursor-pointer flex-col justify-between overflow-hidden rounded-2xl border bg-surface p-5 text-left transition-colors ${
+            dragOver
+              ? "border-foreground/70 bg-zinc-900"
+              : "border-border hover:border-zinc-500"
+          } ${busy ? "cursor-progress" : ""}`}
         >
-          Sign in as a manager to use the advisor.
-        </p>
-      ) : health && !health.reachable ? (
-        <p
-          role="status"
-          className="mb-4 rounded-md border border-amber-900/80 bg-amber-950/50 px-3 py-2 text-xs leading-relaxed text-amber-200"
-        >
-          {health.error ?? "InfiniSynapse is not available yet."}
-        </p>
-      ) : null}
-
-      <form className="flex flex-col gap-4" onSubmit={handleSubmit}>
-        <label className="flex flex-col gap-1.5 text-left">
-          <span className="text-xs font-medium text-zinc-400">Workforce file</span>
           <input
+            ref={inputRef}
             type="file"
             name="file"
             accept=".csv,.xlsx,.xls"
-            className="text-sm text-zinc-300 file:mr-3 file:rounded-md file:border file:border-border file:bg-zinc-900 file:px-3 file:py-1.5 file:text-xs file:text-foreground"
-            onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+            className="sr-only"
+            disabled={busy}
+            onChange={(event) => chooseFile(event.target.files?.[0] ?? null)}
           />
-          <span className="text-xs text-zinc-600">
-            CSV or Excel, up to 5 MB. A sample file is in docs/samples/workforce-sample.csv.
-          </span>
+          <div>
+            <p className="text-[11px] font-medium tracking-[0.16em] text-zinc-500 uppercase">
+              Workforce file
+            </p>
+            <p className="mt-3 max-w-md text-lg font-medium tracking-tight text-foreground">
+              {file ? file.name : "Drop a CSV or Excel file"}
+            </p>
+            <p className="mt-1.5 text-sm text-zinc-500">
+              {file
+                ? formatBytes(file.size)
+                : "Up to 5 MB. A sample lives in docs/samples/workforce-sample.csv."}
+            </p>
+          </div>
+          <div className="mt-8 flex items-center justify-between gap-3">
+            <span className="text-xs text-zinc-500">
+              {dragOver ? "Release to attach" : "Click or drag to replace"}
+            </span>
+            <span className="rounded-full border border-border px-2.5 py-1 text-[11px] text-zinc-400">
+              CSV · XLSX
+            </span>
+          </div>
         </label>
-        {error ? <p className="text-xs text-red-400">{error}</p> : null}
-        <div className="flex flex-wrap gap-2">
-          <Button type="submit" size="sm" loading={submitting} disabled={busy}>
-            Analyze with InfiniSynapse
-          </Button>
-          {busy ? (
-            <Button type="button" size="sm" variant="secondary" onClick={handleCancel}>
-              Stop
-            </Button>
-          ) : null}
-        </div>
+
+        <Card className="rounded-2xl">
+          <CardHeader>
+            <CardTitle>What happens next</CardTitle>
+            <CardDescription>
+              Local checks stay in Zoreva. InfiniSynapse only writes the advisory report.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-4">
+            <ol className="flex flex-col gap-3 text-sm text-zinc-300">
+              <Step n="1" title="Read the sheet" detail="Missing fields, bad rows, and staffing gaps." />
+              <Step n="2" title="Ask InfiniSynapse" detail="The same file, checked again as advice." />
+              <Step n="3" title="Leave the schedule alone" detail="Nothing here books, edits, or deletes a shift." />
+            </ol>
+            {error ? <p className="text-xs leading-relaxed text-red-300">{error}</p> : null}
+            <div className="flex flex-wrap gap-2">
+              <Button type="submit" size="sm" loading={submitting} disabled={busy || !file}>
+                Analyze file
+              </Button>
+              {busy ? (
+                <Button type="button" size="sm" variant="secondary" onClick={handleCancel}>
+                  Stop
+                </Button>
+              ) : job ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => void startAnalysis()}
+                  disabled={!file}
+                >
+                  Run again
+                </Button>
+              ) : null}
+            </div>
+          </CardContent>
+        </Card>
       </form>
 
+      {connection.tone === "warn" ? (
+        <p
+          role="status"
+          className="rounded-2xl border border-amber-900/70 bg-amber-950/40 px-4 py-3 text-sm leading-relaxed text-amber-100"
+        >
+          {connection.detail}
+        </p>
+      ) : null}
+
       {!job ? (
-        <div className="mt-6 rounded-md border border-border bg-surface">
-          <EmptyState
-            title="No analysis yet"
-            description="Upload a roster or hours export. Local checks run in Zoreva; InfiniSynapse writes the advisory findings."
-          />
+        <div className="grid gap-3 sm:grid-cols-3">
+          <Hint title="Missing" detail="Blank names, roles, or hours the sheet should already have." />
+          <Hint title="Inconsistent" detail="Rows that disagree with each other or with a shift." />
+          <Hint title="Staffing" detail="Coverage that looks thin before anyone is booked." />
         </div>
       ) : (
-        <div className="mt-6 flex flex-col gap-4">
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge variant={badgeForStatus(job.status)}>{job.status}</Badge>
-            <p className="text-xs text-zinc-500">{job.progress}</p>
+        <div className="flex flex-col gap-4">
+          <section className="flex flex-col gap-4 rounded-2xl border border-border bg-surface p-4 sm:p-5">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium text-foreground">{job.filename}</p>
+                <p className="mt-1 text-sm text-zinc-400">{job.progress}</p>
+              </div>
+              <Badge variant={statusCopy(job).variant}>{statusCopy(job).label}</Badge>
+            </div>
+            {busy ? <ProgressRail progress={job.progress} /> : null}
+            {job.error ? (
+              <div
+                role="status"
+                className="rounded-xl border border-amber-900/70 bg-amber-950/35 px-4 py-3"
+              >
+                <p className="text-sm font-medium text-amber-100">
+                  {isBusyMessage(job.error)
+                    ? "InfiniSynapse is busy right now"
+                    : "The advisory pass did not finish"}
+                </p>
+                <p className="mt-1 text-sm leading-relaxed text-amber-100/80">{job.error}</p>
+              </div>
+            ) : null}
+          </section>
+
+          <div className="grid gap-4 xl:grid-cols-2">
+            {job.localFindings ? (
+              <FindingsCard
+                title="Zoreva checks"
+                description={`Deterministic scan of ${job.localFindings.rowCount} rows.`}
+                groups={[
+                  { title: "Missing", items: job.localFindings.missingInformation },
+                  {
+                    title: "Inconsistent",
+                    items: job.localFindings.inconsistentRecords.map(
+                      (item) => `Row ${item.row}: ${item.issue}`,
+                    ),
+                  },
+                  { title: "Staffing", items: job.localFindings.staffingIssues },
+                ]}
+              />
+            ) : null}
+
+            {job.analysis ? (
+              <FindingsCard
+                title="InfiniSynapse analysis"
+                description="Validated advice. It does not change shifts, signups, or hours."
+                summary={job.analysis.summary}
+                groups={[
+                  { title: "Missing", items: job.analysis.missingInformation },
+                  {
+                    title: "Inconsistent",
+                    items: job.analysis.inconsistentRecords.map(
+                      (item) => `Row ${item.row}: ${item.issue}`,
+                    ),
+                  },
+                  { title: "Staffing", items: job.analysis.staffingIssues },
+                  { title: "Recommendations", items: job.analysis.recommendations },
+                ]}
+                footer={
+                  job.artifacts.length > 0
+                    ? `Workspace files: ${job.artifacts.join(", ")}`
+                    : undefined
+                }
+              />
+            ) : null}
           </div>
-
-          {job.error ? (
-            <p
-              role="status"
-              className="rounded-md border border-amber-900/80 bg-amber-950/50 px-3 py-2 text-xs leading-relaxed text-amber-200"
-            >
-              {job.error}
-            </p>
-          ) : null}
-
-          {job.localFindings ? (
-            <Card>
-              <CardHeader>
-                <CardTitle>Zoreva checks</CardTitle>
-                <CardDescription>
-                  Deterministic scan of {job.localFindings.rowCount} rows. These are not InfiniSynapse results.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="flex flex-col gap-3 text-sm text-zinc-300">
-                <FindingList
-                  title="Missing"
-                  items={job.localFindings.missingInformation}
-                />
-                <FindingList
-                  title="Inconsistent"
-                  items={job.localFindings.inconsistentRecords.map(
-                    (item) => `Row ${item.row}: ${item.issue}`,
-                  )}
-                />
-                <FindingList title="Staffing" items={job.localFindings.staffingIssues} />
-              </CardContent>
-            </Card>
-          ) : null}
-
-          {job.analysis ? (
-            <Card>
-              <CardHeader>
-                <CardTitle>InfiniSynapse analysis</CardTitle>
-                <CardDescription>
-                  Validated JSON from InfiniSynapse. It does not change shifts, signups, or hours.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="flex flex-col gap-3 text-sm text-zinc-300">
-                <p>{job.analysis.summary}</p>
-                <FindingList title="Missing" items={job.analysis.missingInformation} />
-                <FindingList
-                  title="Inconsistent"
-                  items={job.analysis.inconsistentRecords.map(
-                    (item) => `Row ${item.row}: ${item.issue}`,
-                  )}
-                />
-                <FindingList title="Staffing" items={job.analysis.staffingIssues} />
-                <FindingList title="Recommendations" items={job.analysis.recommendations} />
-                {job.artifacts.length > 0 ? (
-                  <p className="text-xs text-zinc-600">
-                    Workspace files: {job.artifacts.join(", ")}
-                  </p>
-                ) : null}
-              </CardContent>
-            </Card>
-          ) : null}
         </div>
       )}
     </div>
+  );
+}
+
+function connectionState({
+  signedIn,
+  health,
+}: {
+  signedIn: boolean;
+  health: HealthResponse | null;
+}): { label: string; detail: string; tone: "ok" | "wait" | "warn" } {
+  if (!signedIn) {
+    return {
+      label: "Sign in",
+      detail: "Sign in as a manager to use the advisor.",
+      tone: "warn",
+    };
+  }
+  if (!health) {
+    return { label: "Checking", detail: "Checking the advisor connection.", tone: "wait" };
+  }
+  if (!health.reachable) {
+    return {
+      label: "Offline",
+      detail: health.error ?? "InfiniSynapse is not available yet.",
+      tone: "warn",
+    };
+  }
+  return { label: "Ready", detail: "The advisor can reach InfiniSynapse.", tone: "ok" };
+}
+
+function ConnectionPill({
+  state,
+}: {
+  state: { label: string; tone: "ok" | "wait" | "warn" };
+}) {
+  const dot =
+    state.tone === "ok"
+      ? "bg-emerald-400"
+      : state.tone === "warn"
+        ? "bg-amber-400"
+        : "bg-zinc-500";
+  return (
+    <span className="inline-flex items-center gap-2 rounded-full border border-border bg-surface px-3 py-1.5 text-xs text-zinc-300">
+      <span className={`size-1.5 rounded-full ${dot}`} />
+      {state.label}
+    </span>
+  );
+}
+
+function Step({ n, title, detail }: { n: string; title: string; detail: string }) {
+  return (
+    <li className="flex gap-3">
+      <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full border border-border text-[10px] text-zinc-400">
+        {n}
+      </span>
+      <span>
+        <span className="block text-sm text-foreground">{title}</span>
+        <span className="block text-xs leading-relaxed text-zinc-500">{detail}</span>
+      </span>
+    </li>
+  );
+}
+
+function Hint({ title, detail }: { title: string; detail: string }) {
+  return (
+    <div className="rounded-2xl border border-border bg-surface px-4 py-4">
+      <p className="text-sm font-medium text-foreground">{title}</p>
+      <p className="mt-1 text-xs leading-relaxed text-zinc-500">{detail}</p>
+    </div>
+  );
+}
+
+function ProgressRail({ progress }: { progress: string }) {
+  const steps = ["Connect", "Upload", "Analyze", "Read results"];
+  const active = progressStep(progress);
+  return (
+    <ol className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+      {steps.map((step, index) => {
+        const done = index < active;
+        const current = index === active;
+        return (
+          <li
+            key={step}
+            className={`rounded-xl border px-3 py-2 text-xs ${
+              current
+                ? "border-foreground/40 bg-zinc-900 text-foreground"
+                : done
+                  ? "border-border text-zinc-300"
+                  : "border-border text-zinc-600"
+            }`}
+          >
+            {step}
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+function progressStep(progress: string): number {
+  const text = progress.toLowerCase();
+  if (text.includes("reading") || text.includes("result")) return 3;
+  if (text.includes("analy") || text.includes("busy") || text.includes("trying again")) return 2;
+  if (text.includes("upload")) return 1;
+  return 0;
+}
+
+function FindingsCard({
+  title,
+  description,
+  summary,
+  groups,
+  footer,
+}: {
+  title: string;
+  description: string;
+  summary?: string;
+  groups: Array<{ title: string; items: string[] }>;
+  footer?: string;
+}) {
+  return (
+    <Card className="rounded-2xl">
+      <CardHeader>
+        <CardTitle>{title}</CardTitle>
+        <CardDescription>{description}</CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-4">
+        {summary ? <p className="text-sm leading-relaxed text-zinc-200">{summary}</p> : null}
+        {groups.map((group) => (
+          <FindingList key={group.title} title={group.title} items={group.items} />
+        ))}
+        {footer ? <p className="text-xs text-zinc-600">{footer}</p> : null}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -269,7 +480,7 @@ function failIfUnfinished(
   return {
     ...current,
     status: "failed",
-    progress: "Failed",
+    progress: "Stopped",
     error: current.error ?? message,
   };
 }
@@ -299,13 +510,21 @@ async function readAdvisorStream(
 function FindingList({ title, items }: { title: string; items: string[] }) {
   return (
     <div>
-      <p className="text-xs font-medium tracking-wide text-zinc-500 uppercase">{title}</p>
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-[11px] font-medium tracking-[0.14em] text-zinc-500 uppercase">{title}</p>
+        <p className="text-[11px] text-zinc-600">{items.length}</p>
+      </div>
       {items.length === 0 ? (
-        <p className="mt-1 text-xs text-zinc-600">None found.</p>
+        <p className="mt-1.5 text-xs text-zinc-600">None found.</p>
       ) : (
-        <ul className="mt-1 list-disc space-y-1 pl-4 text-xs text-zinc-300">
+        <ul className="mt-1.5 space-y-1.5">
           {items.map((item) => (
-            <li key={item}>{item}</li>
+            <li
+              key={item}
+              className="rounded-lg border border-border/80 bg-background/40 px-3 py-2 text-xs leading-relaxed text-zinc-300"
+            >
+              {item}
+            </li>
           ))}
         </ul>
       )}

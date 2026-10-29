@@ -89,10 +89,26 @@ export class InfiniSynapseConfigError extends Error {
   }
 }
 
+export function isInfiniSynapseBusyMessage(message: string): boolean {
+  return /server is busy/i.test(message) || /服务器繁忙/.test(message);
+}
+
+export function infiniSynapseErrorKind(
+  message: string,
+  code: number | null,
+  status: number,
+): InfiniSynapseApiError["kind"] {
+  if (isInfiniSynapseBusyMessage(message)) return "busy";
+  if (code === 1101 || code === 1105 || status === 401 || status === 403) {
+    return "invalid_credentials";
+  }
+  return "http";
+}
+
 export class InfiniSynapseApiError extends Error {
   status: number;
   code: number | null;
-  kind: "invalid_credentials" | "timeout" | "http" | "malformed";
+  kind: "invalid_credentials" | "timeout" | "http" | "malformed" | "busy";
 
   constructor(
     message: string,
@@ -118,6 +134,9 @@ export function publicErrorMessage(error: unknown): string {
     }
     if (error.kind === "timeout") {
       return "InfiniSynapse timed out before the analysis finished.";
+    }
+    if (error.kind === "busy") {
+      return "InfiniSynapse could not start this analysis because its shared compute is busy. The Zoreva checks below still stand. Try again in a little while.";
     }
     if (error.kind === "malformed") {
       return "InfiniSynapse returned a response we could not read.";

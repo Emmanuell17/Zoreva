@@ -31,7 +31,10 @@ type CreateShiftFormProps = {
     shiftId: string,
     input: CreateShiftInput,
   ) => { ok: true } | { ok: false; reason: string };
+  initialDate?: string;
 };
+
+const ROLE_CHOICES = ["Server", "Cook", "Barista", "Cashier"];
 
 type FormState = {
   date: string;
@@ -73,10 +76,10 @@ function todayDate(): string {
   return toDateValue(new Date());
 }
 
-function getDefaultFormState(): FormState {
+function getDefaultFormState(date?: string): FormState {
   const preset = getShiftPresets()[0];
   return {
-    date: todayDate(),
+    date: date || todayDate(),
     startTime: preset.startTime,
     endTime: preset.endTime,
     slots: String(preset.slots),
@@ -115,12 +118,13 @@ export function CreateShiftForm({
   onCreate,
   shift = null,
   onUpdate,
+  initialDate,
 }: CreateShiftFormProps) {
   const editing = Boolean(shift);
   const days = upcomingDays();
   const presets = getShiftPresets();
   const { signups } = useSchedule();
-  const [severalDays, setSeveralDays] = useState(!editing);
+  const [severalDays, setSeveralDays] = useState(!editing && !initialDate);
   const [selectedDays, setSelectedDays] = useState<string[]>(() =>
     upcomingDays().map((day) => day.value),
   );
@@ -128,7 +132,7 @@ export function CreateShiftForm({
   const [presetTimes, setPresetTimes] = useState<PresetTimes>(timesFromPresets);
   const [presetTimeErrors, setPresetTimeErrors] = useState<Record<string, string>>({});
   const [form, setForm] = useState<FormState>(() =>
-    shift ? formStateFromShift(shift) : getDefaultFormState(),
+    shift ? formStateFromShift(shift) : getDefaultFormState(initialDate),
   );
   const [errors, setErrors] = useState<FieldErrors<CreateShiftFields>>({});
   const [touched, setTouched] = useState<Partial<Record<CreateShiftFields, boolean>>>({});
@@ -399,6 +403,7 @@ export function CreateShiftForm({
                 name="endTime"
                 type="time"
                 value={form.endTime}
+                hint="An earlier end time finishes the next morning."
                 error={touched.endTime ? errors.endTime : undefined}
                 onChange={(event) => updateField("endTime", event.target.value)}
                 onBlur={() =>
@@ -483,6 +488,48 @@ export function CreateShiftForm({
           onBlur={() => setTouched((current) => ({ ...current, slots: true }))}
         />
 
+        <div className="flex flex-col gap-1.5">
+          <p className="text-xs font-medium text-zinc-400">Role (optional)</p>
+          <div className="flex flex-wrap gap-2">
+            {ROLE_CHOICES.map((role) => {
+              const selected = parsePositions(form.roles).some(
+                (item) => item.toLowerCase() === role.toLowerCase(),
+              );
+              return (
+                <button
+                  key={role}
+                  type="button"
+                  onClick={() => {
+                    const current = parsePositions(form.roles);
+                    const next = selected
+                      ? current.filter((item) => item.toLowerCase() !== role.toLowerCase())
+                      : [...current, role];
+                    updateField("roles", next.join(", "));
+                  }}
+                  className={cn(
+                    "rounded-full border px-3 py-1 text-xs",
+                    selected
+                      ? "border-zinc-500 bg-zinc-900 text-foreground"
+                      : "border-border text-zinc-400",
+                  )}
+                >
+                  {role}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+        <Input
+          label="Roles"
+          name="roles"
+          value={form.roles}
+          placeholder="Server, cook, or your own name"
+          hint="Optional. Separate more than one with commas."
+          error={touched.roles ? errors.roles : undefined}
+          onChange={(event) => updateField("roles", event.target.value)}
+          onBlur={() => setTouched((current) => ({ ...current, roles: true }))}
+        />
+
         {editing ? (
           <>
             <Input
@@ -491,16 +538,6 @@ export function CreateShiftForm({
               value={form.label}
               onChange={(event) => updateField("label", event.target.value)}
               placeholder="e.g. Morning"
-            />
-            <Input
-              label="Roles"
-              name="roles"
-              value={form.roles}
-              placeholder="Write the jobs for this shift"
-              hint="Use your own names, separated by commas."
-              error={touched.roles ? errors.roles : undefined}
-              onChange={(event) => updateField("roles", event.target.value)}
-              onBlur={() => setTouched((current) => ({ ...current, roles: true }))}
             />
             <Input
               label="Note (optional)"

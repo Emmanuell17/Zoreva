@@ -44,7 +44,12 @@ export function validateFutureDate(value: string): string | undefined {
 }
 
 export function validateTime(value: string, label = "Time"): string | undefined {
-  return validateRequired(value, label);
+  const missing = validateRequired(value, label);
+  if (missing) return missing;
+  if (!/^([01]?\d|2[0-3]):[0-5]\d$/.test(value)) {
+    return `${label} must be a time like 09:00.`;
+  }
+  return undefined;
 }
 
 export function validateTimeRange(
@@ -56,8 +61,8 @@ export function validateTimeRange(
     endTime: validateTime(endTime, "End time"),
   };
 
-  if (!errors.startTime && !errors.endTime && startTime >= endTime) {
-    errors.endTime = "End time must be after start time.";
+  if (!errors.startTime && !errors.endTime && startTime === endTime) {
+    errors.endTime = "End time must be different from the start time.";
   }
 
   return errors;

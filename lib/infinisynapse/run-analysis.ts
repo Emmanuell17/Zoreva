@@ -8,6 +8,7 @@ import {
 } from "@/lib/infinisynapse/client";
 import {
   InfiniSynapseApiError,
+  isInfiniSynapseBusyMessage,
   publicErrorMessage,
 } from "@/lib/infinisynapse/config";
 import {
@@ -38,6 +39,7 @@ import {
 
 const ANALYSIS_TIMEOUT_MS = 180_000;
 const READY_WAIT_MS = 3_000;
+const BUSY_RETRY_DELAYS_MS = [4_000, 12_000];
 
 function analysisPrompt(filename: string, rowCount: number): string {
   return [
@@ -50,6 +52,31 @@ function analysisPrompt(filename: string, rowCount: number): string {
     "When finished, return ONLY a JSON object in a markdown fence with this exact shape:",
     '{ "summary": "string", "missingInformation": ["string"], "inconsistentRecords": [{"row": 1, "issue": "string"}], "staffingIssues": ["string"], "recommendations": ["string"] }',
   ].join("\n");
+}
+
+function wait(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) {
+      reject(new DOMException("The analysis was cancelled.", "AbortError"));
+      return;
+    }
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new DOMException("The analysis was cancelled.", "AbortError"));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+function isBusyError(error: unknown): boolean {
+  return (
+    error instanceof InfiniSynapseApiError &&
+    (error.kind === "busy" || isInfiniSynapseBusyMessage(error.message))
+  );
 }
 
 function collectSayText(
@@ -112,6 +139,7 @@ export async function runWorkforceAnalysis(
 
   let completed = false;
   let uploadAsked = false;
+  let taskStarted = false;
   let lastTaskId = job.infiniTaskId;
 
   const events = consumeInfiniSynapseEvents(
@@ -122,7 +150,13 @@ export async function runWorkforceAnalysis(
 
       if (event.event === "state.ready") markReady();
       if (isErrorNotification(event)) {
-        throw new InfiniSynapseApiError(notificationText(event));
+        const text = notificationText(event);
+        // A busy notice before the task is accepted is the same HTTP 500 the
+        // create call retries. Letting it kill the stream would drop the retry.
+        if (isInfiniSynapseBusyMessage(text) && !taskStarted) return;
+        throw new InfiniSynapseApiError(text, {
+          kind: isInfiniSynapseBusyMessage(text) ? "busy" : "http",
+        });
       }
 
       const message = readMessage(event);
@@ -165,27 +199,45 @@ export async function runWorkforceAnalysis(
     setJobProgress(jobId, "Uploading source file…", lastTaskId);
     await uploadTaskWorkspaceFile(job.infiniTaskId, job.file, controller.signal);
 
-    setJobProgress(jobId, "Starting InfiniSynapse analysis…", lastTaskId);
-    await sendInfiniSynapseMessage(
-      {
-        type: "newTask",
-        text: analysisPrompt(job.file.filename, table.rows.length),
-        connId: job.connId,
-        taskId: job.infiniTaskId,
-        chatSettings: { mode: "act" },
-        autoApprovalSettings: {
-          maxRequests: 1000,
-          maxSubAgentRequests: 500,
-          enableNotifications: true,
-          debugMode: false,
-          enableWebSearch: false,
-          enableReadImage: false,
-          enableBrowser: false,
-          enableNativeToolCalling: true,
-        },
-      },
-      controller.signal,
-    );
+    const attempts = BUSY_RETRY_DELAYS_MS.length + 1;
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      if (attempt > 0) {
+        setJobProgress(
+          jobId,
+          `InfiniSynapse is busy. Trying again (${attempt + 1} of ${attempts})…`,
+          lastTaskId,
+        );
+        await wait(BUSY_RETRY_DELAYS_MS[attempt - 1], controller.signal);
+      } else {
+        setJobProgress(jobId, "Starting InfiniSynapse analysis…", lastTaskId);
+      }
+      try {
+        await sendInfiniSynapseMessage(
+          {
+            type: "newTask",
+            text: analysisPrompt(job.file.filename, table.rows.length),
+            connId: job.connId,
+            taskId: job.infiniTaskId,
+            chatSettings: { mode: "act" },
+            autoApprovalSettings: {
+              maxRequests: 1000,
+              maxSubAgentRequests: 500,
+              enableNotifications: true,
+              debugMode: false,
+              enableWebSearch: false,
+              enableReadImage: false,
+              enableBrowser: false,
+              enableNativeToolCalling: true,
+            },
+          },
+          controller.signal,
+        );
+        taskStarted = true;
+        break;
+      } catch (error) {
+        if (!isBusyError(error) || attempt === attempts - 1) throw error;
+      }
+    }
 
     await events;
 

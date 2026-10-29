@@ -1,3 +1,5 @@
+import { clockMinutes, shiftsOverlap } from "@/lib/time/interval";
+import { DEFAULT_BUSINESS_TIMEZONE, shiftEndUtc } from "@/lib/time/zoned";
 import type { HoursEntry, Shift, ShiftSignup } from "@/types";
 
 export function toDate(value: string | Date): Date {
@@ -34,11 +36,16 @@ export function isSameShiftSlot(
 }
 
 export function shiftDateTime(shift: Pick<Shift, "date" | "startTime" | "endTime">, which: "start" | "end"): Date {
-  const date = toDate(shift.date);
-  const [hours, minutes] = (which === "start" ? shift.startTime : shift.endTime)
-    .split(":")
-    .map(Number);
-  date.setHours(hours || 0, minutes || 0, 0, 0);
+  const key = calendarDayKey(shift.date);
+  const [year, month, day] = key.split("-").map(Number);
+  const clock = which === "start" ? shift.startTime : shift.endTime;
+  const minutes = clockMinutes(clock) ?? 0;
+  const date = new Date(year || 1970, (month || 1) - 1, day || 1, Math.floor(minutes / 60), minutes % 60, 0, 0);
+  const start = clockMinutes(shift.startTime);
+  const end = clockMinutes(shift.endTime);
+  if (which === "end" && start !== null && end !== null && end <= start) {
+    date.setDate(date.getDate() + 1);
+  }
   return date;
 }
 
@@ -53,16 +60,27 @@ export function isUpcomingShift(shift: Shift, now = new Date()): boolean {
   return !isPastShift(shift, now);
 }
 
-export function isPastShift(shift: Shift, now = new Date()): boolean {
-  return shiftDateTime(shift, "end") <= now;
+export function isPastShift(
+  shift: Shift,
+  now = new Date(),
+  timeZone: string = DEFAULT_BUSINESS_TIMEZONE,
+): boolean {
+  const instant = shiftEndUtc(
+    calendarDayKey(shift.date),
+    shift.startTime,
+    shift.endTime,
+    timeZone,
+  );
+  if (instant === null) return shiftDateTime(shift, "end") <= now;
+  return instant <= now.getTime();
 }
 
 export function hoursBetween(startTime: string, endTime: string): number {
-  const [startHours, startMinutes] = startTime.split(":").map(Number);
-  const [endHours, endMinutes] = endTime.split(":").map(Number);
-  const start = (startHours || 0) * 60 + (startMinutes || 0);
-  const end = (endHours || 0) * 60 + (endMinutes || 0);
-  return Math.max(0, (end - start) / 60);
+  const start = clockMinutes(startTime);
+  const end = clockMinutes(endTime);
+  if (start === null || end === null) return 0;
+  const span = end > start ? end - start : end < start ? end + 24 * 60 - start : 0;
+  return span / 60;
 }
 
 export function formatHourCount(hours: number): string {
@@ -124,6 +142,22 @@ export function employeeHasOverlap(
   shifts: Shift[],
   signups: ShiftSignup[],
 ): boolean {
+  const target = {
+    date: calendarDayKey(shift.date),
+    startTime: shift.startTime,
+    endTime: shift.endTime,
+  };
+  const assigned = shifts.some((other) => {
+    if (other.id === shift.id) return false;
+    if (!(other.assigneeIds ?? []).includes(employeeId)) return false;
+    return shiftsOverlap(target, {
+      date: calendarDayKey(other.date),
+      startTime: other.startTime,
+      endTime: other.endTime,
+    });
+  });
+  if (assigned) return true;
+
   const mine = activeSignups(signups).filter(
     (signup) => signup.employeeId === employeeId,
   );
@@ -131,9 +165,10 @@ export function employeeHasOverlap(
   return mine.some((signup) => {
     const other = shifts.find((item) => item.id === signup.shiftId);
     if (!other || other.id === shift.id) return false;
-    return (
-      sameShiftDay(shift, other) &&
-      timesOverlap(shift.startTime, shift.endTime, other.startTime, other.endTime)
-    );
+    return shiftsOverlap(target, {
+      date: calendarDayKey(other.date),
+      startTime: other.startTime,
+      endTime: other.endTime,
+    });
   });
 }

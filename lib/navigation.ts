@@ -7,11 +7,13 @@ export const employeeNav: NavItem[] = [
   { href: "/employee", label: "Home" },
   { href: "/employee/choose", label: "Choose" },
   { href: "/employee/schedule", label: "Schedule" },
+  { href: "/employee/availability", label: "Availability" },
   { href: "/employee/hours", label: "Hours" },
 ];
 
 export const adminNav: NavItem[] = [
   { href: "/admin", label: "Shifts" },
+  { href: "/admin/availability", label: "Time off" },
   { href: "/admin/hours", label: "Hours" },
   { href: "/admin/history", label: "History" },
   { href: "/admin/advisor", label: "Advisor" },

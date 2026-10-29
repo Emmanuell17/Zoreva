@@ -38,12 +38,14 @@ import { redactCompanyForMember } from "@/lib/security/policy";
 import { isShiftDatePassed } from "@/lib/shift-utils";
 import { buildCompanyWorkspace } from "@/lib/company/build-workspace";
 import type {
+  AvailabilityWindow,
   Company,
   CompanySetupInput,
   HoursEntry,
   Role,
   Shift,
   ShiftSignup,
+  TimeOffRequest,
   User,
 } from "@/types";
 import type { Unsubscribe } from "firebase/firestore";
@@ -168,6 +170,19 @@ export function subscribeCompany(listener: () => void) {
 
 export function getActiveCompany(): Company | null {
   return activeCompany;
+}
+
+export function updateStaffing(staffing: {
+  availability: AvailabilityWindow[];
+  timeOff: TimeOffRequest[];
+}) {
+  if (!activeCompany) return;
+  activeCompany = saveCompanyLocal({
+    ...activeCompany,
+    availability: staffing.availability,
+    timeOff: staffing.timeOff,
+  });
+  notify();
 }
 
 export function getCurrentEmployeeId(): string {

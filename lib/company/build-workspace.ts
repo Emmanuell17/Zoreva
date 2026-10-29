@@ -1,5 +1,6 @@
 import { uniqueJoinCode } from "@/lib/company/persistence";
 import { JOIN_CODE_TTL_MS } from "@/lib/security/policy";
+import { detectedTimeZone } from "@/lib/time/zoned";
 import type { Company, CompanySetupInput, User } from "@/types";
 
 function slugify(value: string): string {
@@ -57,5 +58,6 @@ export function buildCompanyWorkspace(
     signups: [],
     hours: [],
     setupCompletedAt: now,
+    timezone: detectedTimeZone(),
   });
 }
