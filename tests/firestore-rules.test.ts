@@ -816,3 +816,63 @@ test("manager assignments share the claim ledger and cannot overlap", async () =
   );
   await assertSucceeds(adjacent.commit());
 });
+
+test("only the owning manager can delete a company, and only after marking it closing", async () => {
+  const owner = testEnv.authenticatedContext("owner1", { email: "ada@cafe.test" }).firestore();
+  const employee = testEnv.authenticatedContext("emp1", { email: "sam@cafe.test" }).firestore();
+  const otherOwner = testEnv.authenticatedContext("owner2", { email: "other@cafe.test" }).firestore();
+
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    const db = context.firestore();
+    await setDoc(doc(db, "owners/owner1"), { companyId: "co1" });
+    await setDoc(doc(db, "emails/ada@cafe.test"), { companyId: "co1" });
+    await setDoc(doc(db, "joinReceipts/emp1"), {
+      companyId: "co1",
+      code: "ABCDE23456",
+      createdAt: Date.now(),
+    });
+  });
+
+  await assertFails(deleteDoc(doc(owner, "companies/co1")));
+  await assertFails(deleteDoc(doc(owner, "companies/co1/hours/own")));
+  await assertFails(deleteDoc(doc(owner, "companies/co1/roster/co1_emp1")));
+  await assertFails(deleteDoc(doc(owner, "owners/owner1")));
+  await assertFails(deleteDoc(doc(owner, "memberships/owner1")));
+  await assertFails(deleteDoc(doc(employee, "memberships/emp1")));
+
+  await assertFails(updateDoc(doc(otherOwner, "companies/co1"), { closingAt: Date.now() }));
+  await assertFails(updateDoc(doc(employee, "companies/co1"), { closingAt: Date.now() }));
+  await assertFails(updateDoc(doc(owner, "companies/co1"), { closingAt: "soon" }));
+  await assertSucceeds(updateDoc(doc(owner, "companies/co1"), { closingAt: Date.now() }));
+
+  await assertFails(deleteDoc(doc(employee, "companies/co1/hours/own")));
+  await assertFails(deleteDoc(doc(employee, "companies/co1")));
+  await assertFails(deleteDoc(doc(otherOwner, "companies/co1/hours/own")));
+  await assertFails(deleteDoc(doc(otherOwner, "companies/co1")));
+  await assertFails(deleteDoc(doc(owner, "companies/co2/published/schedule")));
+
+  await assertSucceeds(deleteDoc(doc(owner, "companies/co1/hours/own")));
+  await assertSucceeds(deleteDoc(doc(owner, "companies/co1/hours/other")));
+  await assertSucceeds(deleteDoc(doc(owner, "companies/co1/openings/shift1")));
+  await assertSucceeds(deleteDoc(doc(owner, "companies/co1/roster/co1_emp1")));
+  await assertSucceeds(deleteDoc(doc(owner, "companies/co1/published/schedule")));
+  await assertSucceeds(deleteDoc(doc(owner, "joinCodes/ABCDE23456")));
+  await assertSucceeds(deleteDoc(doc(owner, "companies/co1")));
+
+  await assertFails(deleteDoc(doc(owner, "memberships/owner2")));
+  await assertFails(deleteDoc(doc(otherOwner, "memberships/owner2")));
+  await assertSucceeds(deleteDoc(doc(owner, "owners/owner1")));
+  await assertSucceeds(deleteDoc(doc(owner, "emails/ada@cafe.test")));
+  await assertSucceeds(deleteDoc(doc(owner, "memberships/owner1")));
+
+  await assertFails(deleteDoc(doc(owner, "memberships/emp1")));
+  await assertSucceeds(deleteDoc(doc(employee, "joinReceipts/emp1")));
+  await assertSucceeds(deleteDoc(doc(employee, "memberships/emp1")));
+
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    const db = context.firestore();
+    assert.equal((await getDoc(doc(db, "companies/co1"))).exists(), false);
+    assert.equal((await getDoc(doc(db, "companies/co2"))).exists(), true);
+    assert.equal((await getDoc(doc(db, "memberships/owner2"))).exists(), true);
+  });
+});

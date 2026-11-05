@@ -4,6 +4,9 @@ import { signupsSeed } from "@/lib/mocks/signups";
 import { CURRENT_EMPLOYEE_ID, usersSeed } from "@/lib/mocks/users";
 import {
   JoinFailed,
+  clearClosedCompanyLinksRemote,
+  companyClosedForEmployeeRemote,
+  deleteCompanyRemote,
   ensureOwnerMembershipRemote,
   isPermissionDenied,
   joinCompanyRemote,
@@ -21,6 +24,7 @@ import {
 import { attachAuthEmployee } from "@/lib/company/membership";
 import {
   findLocalCompanyForManager,
+  forgetCompanyLocal,
   getCompanyById,
   getCompanyIdForJoinCode,
   getMembership,
@@ -266,6 +270,49 @@ function applyCompany(
   notify();
 }
 
+export async function deleteActiveCompany(input: {
+  confirmName: string;
+  authEmail?: string | null;
+}): Promise<{ ok: true } | { ok: false; reason: string }> {
+  const company = activeCompany;
+  if (!company) return { ok: false, reason: "There is no company open to delete." };
+  if (input.confirmName.trim() !== company.companyName.trim()) {
+    return { ok: false, reason: "Type the company name exactly as shown to confirm." };
+  }
+  if (canUseFirestore()) {
+    if (
+      !session ||
+      session.role !== "ADMIN" ||
+      session.companyId !== company.id ||
+      company.ownerId !== session.uid
+    ) {
+      return { ok: false, reason: "Only the manager who owns this company can delete it." };
+    }
+    stopWatch();
+    try {
+      await deleteCompanyRemote({
+        companyId: company.id,
+        ownerId: session.uid,
+        joinCode: company.joinCode,
+        authEmail: input.authEmail,
+      });
+    } catch {
+      startWatch(company.id);
+      return {
+        ok: false,
+        reason:
+          "Could not finish deleting the company. Some records may already be removed. Check your connection and try again to finish.",
+      };
+    }
+  }
+  forgetCompanyLocal(company.id);
+  stopWatch();
+  setSession(null);
+  activeCompany = null;
+  applyCompany(null);
+  return { ok: true };
+}
+
 export function activateDemoWorkspace() {
   stopWatch();
   setSession(null);
@@ -439,21 +486,38 @@ export async function hydrateWorkspace(options: {
   });
 
   if (options.configured && options.uid && canUseFirestore()) {
-    const membership = await loadMembershipRemote(options.uid);
+    let membership = await loadMembershipRemote(options.uid);
     if (
       membership &&
       membership.userId === options.uid &&
       membership.role === "ADMIN"
     ) {
-      const loaded = await loadManagerCompanyRemote(membership.companyId);
+      const adminMembership = membership;
+      const loaded = await loadManagerCompanyRemote(adminMembership.companyId);
+      if (!loaded && (await clearClosedCompanyLinksRemote(options.uid, options.email))) {
+        forgetCompanyLocal(adminMembership.companyId);
+        membership = null;
+      }
       if (loaded && loaded.company.ownerId === options.uid) {
         const published = await publishManagerCompany(loaded.company, options.uid);
         if (published) {
           if (options.email) saveOwnerEmail(options.email, published.id);
-          saveMembership(membership);
+          saveMembership(adminMembership);
           activateManager(published, options.uid);
           return { role: "ADMIN" };
         }
+      }
+    }
+
+    if (
+      membership &&
+      membership.userId === options.uid &&
+      membership.role === "EMPLOYEE" &&
+      (await companyClosedForEmployeeRemote(membership.companyId))
+    ) {
+      if (await clearClosedCompanyLinksRemote(options.uid, options.email)) {
+        forgetCompanyLocal(membership.companyId);
+        membership = null;
       }
     }
 
@@ -492,6 +556,7 @@ export async function hydrateWorkspace(options: {
       if (!remoteId) remoteId = await loadCompanyIdForEmailRemote(options.email);
       if (remoteId) {
         const loaded = await loadManagerCompanyRemote(remoteId);
+        if (!loaded) await clearClosedCompanyLinksRemote(options.uid, options.email);
         if (loaded && loaded.company.ownerId === options.uid) {
           const published = await publishManagerCompany(loaded.company, options.uid);
           if (published) {

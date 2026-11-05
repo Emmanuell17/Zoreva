@@ -50,6 +50,18 @@ service cloud.firestore {
       return isManager(companyId) || isEmployee(companyId);
     }
 
+    function closing(companyId) {
+      return isManager(companyId)
+        && getAfter(companyPath(companyId)).data.get('closingAt', 0) is int
+        && getAfter(companyPath(companyId)).data.get('closingAt', 0) > 0;
+    }
+
+    function companyGone(data) {
+      return data.companyId is string
+        && data.companyId.size() > 0
+        && !exists(companyPath(data.companyId));
+    }
+
     function openingPath(companyId, shiftId) {
       return /databases/$(database)/documents/companies/$(companyId)/openings/$(shiftId);
     }
@@ -309,38 +321,32 @@ service cloud.firestore {
     }
 
     function validCompany(data) {
-      return (
-          data.keys().hasOnly([
-            'id',
-            'ownerId',
-            'companyName',
-            'managerName',
-            'email',
-            'employeeCount',
-            'shiftTemplates',
-            'setupCompletedAt',
-            'joinCode',
-            'joinCodeExpiresAt'
-          ])
+      return data.keys().hasOnly([
+          'id',
+          'ownerId',
+          'companyName',
+          'managerName',
+          'email',
+          'employeeCount',
+          'shiftTemplates',
+          'setupCompletedAt',
+          'joinCode',
+          'joinCodeExpiresAt',
+          'timezone',
+          'closingAt'
+        ])
+        && (
+          !data.keys().hasAny(['timezone'])
           || (
-            data.keys().hasOnly([
-              'id',
-              'ownerId',
-              'companyName',
-              'managerName',
-              'email',
-              'employeeCount',
-              'shiftTemplates',
-              'setupCompletedAt',
-              'joinCode',
-              'joinCodeExpiresAt',
-              'timezone'
-            ])
-            && data.timezone is string
+            data.timezone is string
             && data.timezone.size() > 0
             && data.timezone.size() < 64
             && data.timezone.matches('^[A-Za-z0-9_+\\-/]+$')
           )
+        )
+        && (
+          !data.keys().hasAny(['closingAt'])
+          || (data.closingAt is int && data.closingAt > 0)
         )
         && data.id is string
         && data.id.size() > 0
@@ -396,7 +402,13 @@ service cloud.firestore {
           || joinExpiryWindow(request.resource.data.joinCodeExpiresAt)
         );
 
-      allow delete: if false;
+      allow delete: if signedIn()
+        && resource.data.ownerId == request.auth.uid
+        && resource.data.get('closingAt', 0) is int
+        && resource.data.get('closingAt', 0) > 0
+        && get(memberPath()).data.userId == request.auth.uid
+        && get(memberPath()).data.role == 'ADMIN'
+        && get(memberPath()).data.companyId == companyId;
 
       match /published/{docId} {
         allow get: if docId == 'schedule' && isMember(companyId);
@@ -409,7 +421,7 @@ service cloud.firestore {
           && request.resource.data.companyName.size() < 200
           && request.resource.data.shiftTemplates is list
           && request.resource.data.shifts is list;
-        allow delete: if false;
+        allow delete: if closing(companyId);
       }
 
       match /drafts/{docId} {
@@ -419,7 +431,7 @@ service cloud.firestore {
           && isManager(companyId)
           && request.resource.data.keys().hasOnly(['shifts'])
           && request.resource.data.shifts is list;
-        allow delete: if false;
+        allow delete: if closing(companyId);
       }
 
       match /roster/{employeeId} {
@@ -459,7 +471,7 @@ service cloud.firestore {
           && request.resource.data.name.size() > 0
           && request.resource.data.name.size() < 120;
 
-        allow delete: if false;
+        allow delete: if closing(companyId);
       }
 
       match /directory/{employeeId} {
@@ -490,7 +502,7 @@ service cloud.firestore {
           && request.resource.data.email.size() > 3
           && request.resource.data.email.size() < 200;
 
-        allow delete: if false;
+        allow delete: if closing(companyId);
       }
 
       match /openings/{shiftId} {
@@ -511,7 +523,7 @@ service cloud.firestore {
             || releasesSeat(companyId, shiftId)
           );
 
-        allow delete: if false;
+        allow delete: if closing(companyId);
       }
 
       match /claims/{employeeId} {
@@ -560,7 +572,7 @@ service cloud.firestore {
           || managerAddsClaim(companyId, employeeId)
           || managerReleasesClaim(companyId, employeeId);
 
-        allow delete: if false;
+        allow delete: if closing(companyId);
       }
 
       function assignmentPath(companyId, employeeId, shiftId) {
@@ -645,14 +657,17 @@ service cloud.firestore {
             request.resource.data
           );
         allow update: if false;
-        allow delete: if isManager(companyId)
-          && resource.data.employeeId is string
-          && resource.data.shiftId is string
-          && assignmentId == resource.data.employeeId + '~' + resource.data.shiftId
-          && exists(claimPath(companyId, resource.data.employeeId))
-          && !hasShift(
-            getAfter(claimPath(companyId, resource.data.employeeId)).data.bookings,
-            resource.data.shiftId
+        allow delete: if closing(companyId)
+          || (
+            isManager(companyId)
+            && resource.data.employeeId is string
+            && resource.data.shiftId is string
+            && assignmentId == resource.data.employeeId + '~' + resource.data.shiftId
+            && exists(claimPath(companyId, resource.data.employeeId))
+            && !hasShift(
+              getAfter(claimPath(companyId, resource.data.employeeId)).data.bookings,
+              resource.data.shiftId
+            )
           );
       }
 
@@ -691,7 +706,7 @@ service cloud.firestore {
           ])
           && request.resource.data.confirmedAt is string;
 
-        allow delete: if isEmployee(companyId)
+        allow delete: if closing(companyId) || isEmployee(companyId)
           && resource.data.employeeId == memberData().employeeId
           && exists(openingPath(companyId, resource.data.shiftId))
           && getAfter(openingPath(companyId, resource.data.shiftId)).data.taken == get(openingPath(companyId, resource.data.shiftId)).data.taken - 1
@@ -731,7 +746,8 @@ service cloud.firestore {
           && request.resource.data.submittedAt is string
           && request.resource.data.submittedAt.size() < 40;
 
-        allow update, delete: if false;
+        allow update: if false;
+        allow delete: if closing(companyId);
       }
 
       match /availability/{windowId} {
@@ -785,8 +801,8 @@ service cloud.firestore {
             || request.resource.data.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
           );
 
-        allow delete: if isEmployee(companyId)
-          && resource.data.employeeId == memberData().employeeId;
+        allow delete: if closing(companyId)
+          || (isEmployee(companyId) && resource.data.employeeId == memberData().employeeId);
       }
 
       match /timeOff/{requestId} {
@@ -827,16 +843,22 @@ service cloud.firestore {
           && request.resource.data.reviewNote is string
           && request.resource.data.reviewedAt is string;
 
-        allow delete: if isEmployee(companyId)
-          && resource.data.employeeId == memberData().employeeId
-          && resource.data.status == 'pending';
+        allow delete: if closing(companyId)
+          || (
+            isEmployee(companyId)
+            && resource.data.employeeId == memberData().employeeId
+            && resource.data.status == 'pending'
+          );
       }
     }
 
     match /memberships/{userId} {
       allow get: if signedIn() && request.auth.uid == userId;
       allow list: if false;
-      allow update, delete: if false;
+      allow update: if false;
+      allow delete: if signedIn()
+        && request.auth.uid == userId
+        && companyGone(resource.data);
 
       allow create: if signedIn()
         && request.auth.uid == userId
@@ -866,7 +888,10 @@ service cloud.firestore {
 
     match /joinReceipts/{userId} {
       allow get, list: if false;
-      allow update, delete: if false;
+      allow update: if false;
+      allow delete: if signedIn()
+        && request.auth.uid == userId
+        && companyGone(resource.data);
       allow create: if signedIn()
         && request.auth.uid == userId
         && request.resource.data.keys().hasOnly(['companyId', 'code', 'createdAt'])
@@ -916,7 +941,10 @@ service cloud.firestore {
     match /owners/{ownerId} {
       allow get: if signedIn() && request.auth.uid == ownerId;
       allow list: if false;
-      allow update, delete: if false;
+      allow update: if false;
+      allow delete: if signedIn()
+        && request.auth.uid == ownerId
+        && companyGone(resource.data);
       allow create: if signedIn()
         && request.auth.uid == ownerId
         && request.resource.data.keys().hasOnly(['companyId'])
@@ -927,7 +955,11 @@ service cloud.firestore {
     match /emails/{emailId} {
       allow get: if signedIn() && authEmail() == emailId && emailId.size() > 3;
       allow list: if false;
-      allow update, delete: if false;
+      allow update: if false;
+      allow delete: if signedIn()
+        && authEmail() == emailId
+        && emailId.size() > 3
+        && companyGone(resource.data);
       allow create: if signedIn()
         && authEmail() == emailId
         && emailId.size() > 3

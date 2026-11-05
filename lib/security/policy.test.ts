@@ -368,5 +368,9 @@ test("firestore rules are default-deny", () => {
   const rules = readFileSync("firestore.rules", "utf8");
   assert.equal(rules.includes("if true"), false);
   assert.equal(rules.includes("joinCode.size() >= 10"), true);
-  assert.match(rules, /allow update, delete: if false;/);
+  assert.match(rules, /allow update: if false;/);
+  for (const path of ["memberships", "joinReceipts", "owners", "emails"]) {
+    const block = rules.slice(rules.indexOf(`match /${path}/`));
+    assert.match(block.slice(0, block.indexOf("allow create")), /companyGone\(resource\.data\)/);
+  }
 });

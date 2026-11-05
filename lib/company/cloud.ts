@@ -8,6 +8,7 @@ import {
   query,
   runTransaction,
   setDoc,
+  updateDoc,
   where,
   writeBatch,
   type Unsubscribe,
@@ -700,6 +701,114 @@ export class JoinFailed extends Error {
   }
 }
 
+const COMPANY_COLLECTIONS = [
+  "assignments",
+  "signups",
+  "claims",
+  "openings",
+  "hours",
+  "availability",
+  "timeOff",
+  "directory",
+  "roster",
+] as const;
+
+async function deleteRefs(refs: ReturnType<typeof doc>[]): Promise<void> {
+  for (let index = 0; index < refs.length; index += 25) {
+    await Promise.all(refs.slice(index, index + 25).map((ref) => deleteDoc(ref)));
+  }
+}
+
+async function deleteIfPresent(ref: ReturnType<typeof doc>): Promise<void> {
+  try {
+    const snap = await getDoc(ref);
+    if (snap.exists()) await deleteDoc(ref);
+  } catch {
+    // Unreadable or already removed. Nothing left to delete here.
+  }
+}
+
+/**
+ * Removes a company the signed-in owner manages.
+ * Order matters: the company is marked as closing, its records are removed
+ * while the owner is still its manager, then the company, then the owner's
+ * own sign-in links. Employees clear their own links on their next sign-in.
+ */
+export async function deleteCompanyRemote(input: {
+  companyId: string;
+  ownerId: string;
+  joinCode: string;
+  authEmail: string | null | undefined;
+}): Promise<void> {
+  if (!canUseFirestore()) return;
+  const db = getFirebaseFirestore();
+  const companyRef = doc(db, "companies", input.companyId);
+  await updateDoc(companyRef, { closingAt: Date.now() });
+
+  for (const name of COMPANY_COLLECTIONS) {
+    const snap = await getDocs(collection(db, "companies", input.companyId, name));
+    await deleteRefs(snap.docs.map((item) => item.ref));
+  }
+  await deleteIfPresent(doc(db, "companies", input.companyId, "published", "schedule"));
+  await deleteIfPresent(doc(db, "companies", input.companyId, "drafts", "rota"));
+
+  const code = normalizeJoinCode(input.joinCode);
+  if (code.length >= 10) {
+    try {
+      await deleteDoc(doc(db, "joinCodes", code));
+    } catch {
+      // An expired or already removed code cannot be used to join anyway.
+    }
+  }
+
+  await deleteDoc(companyRef);
+  await clearClosedCompanyLinksRemote(input.ownerId, input.authEmail);
+}
+
+/**
+ * Deletes this account's sign-in links that point at a company that no longer exists.
+ * Rules refuse each delete while the company still exists.
+ * Returns true when the account has no membership left.
+ */
+export async function clearClosedCompanyLinksRemote(
+  userId: string,
+  authEmail: string | null | undefined,
+): Promise<boolean> {
+  if (!canUseFirestore() || !userId) return false;
+  const db = getFirebaseFirestore();
+  const attempts: Array<ReturnType<typeof doc>> = [
+    doc(db, "owners", userId),
+    doc(db, "joinReceipts", userId),
+  ];
+  const email = normalizeEmail(authEmail);
+  if (email.includes("@")) attempts.push(doc(db, "emails", email));
+  for (const ref of attempts) {
+    try {
+      await deleteDoc(ref);
+    } catch {
+      // Missing, or the company still exists.
+    }
+  }
+  try {
+    await deleteDoc(doc(db, "memberships", userId));
+  } catch {
+    // Missing, or the company still exists.
+  }
+  return (await loadMembershipRemote(userId)) === null;
+}
+
+export async function companyClosedForEmployeeRemote(companyId: string): Promise<boolean> {
+  if (!canUseFirestore()) return false;
+  try {
+    const snap = await getDoc(
+      doc(getFirebaseFirestore(), "companies", companyId, "published", "schedule"),
+    );
+    return !snap.exists();
+  } catch {
+    return false;
+  }
+}
+
 export async function joinCompanyRemote(input: {
   userId: string;
   code: string;
@@ -714,6 +823,7 @@ export async function joinCompanyRemote(input: {
     throw new JoinFailed("Enter the 10-character code from your manager.");
   }
 
+  await clearClosedCompanyLinksRemote(input.userId, input.email);
   const owned = await loadCompanyIdForOwnerRemote(input.userId);
   if (owned) {
     throw new JoinFailed(

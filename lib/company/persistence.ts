@@ -232,6 +232,28 @@ export function saveCompanyLocal(company: Company) {
   return next;
 }
 
+export function forgetCompanyLocal(companyId: string) {
+  const workspaces = getWorkspaces();
+  delete workspaces[companyId];
+  writeJson(WORKSPACES_KEY, workspaces);
+
+  const dropMatching = (key: string, map: Record<string, string>) => {
+    for (const [entry, value] of Object.entries(map)) {
+      if (value === companyId) delete map[entry];
+    }
+    writeJson(key, map);
+  };
+  dropMatching(OWNERS_KEY, getOwnerMap());
+  dropMatching(EMAILS_KEY, getEmailMap());
+  dropMatching(JOIN_CODES_KEY, getJoinCodeMap());
+
+  const memberships = getMembershipMap();
+  for (const [userId, membership] of Object.entries(memberships)) {
+    if (membership.companyId === companyId) delete memberships[userId];
+  }
+  writeJson(MEMBERSHIPS_KEY, memberships);
+}
+
 export function saveCompany(company: Company) {
   return saveCompanyLocal(company);
 }
