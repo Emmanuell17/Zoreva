@@ -60,16 +60,44 @@ function upcomingDays(count = 7): Array<{ value: string; label: string }> {
     const date = new Date();
     date.setHours(12, 0, 0, 0);
     date.setDate(date.getDate() + index);
-    const weekday = date.toLocaleDateString("en-US", {
-      weekday: "short",
-      month: "short",
-      day: "numeric",
-    });
-    return {
-      value: toDateValue(date),
-      label: index === 0 ? `Today · ${weekday}` : weekday,
-    };
+    return dayOption(toDateValue(date));
   });
+}
+
+function dayOption(value: string): { value: string; label: string } {
+  const date = new Date(`${value}T12:00:00`);
+  const weekday = date.toLocaleDateString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  });
+  return {
+    value,
+    label: value === todayDate() ? `Today · ${weekday}` : weekday,
+  };
+}
+
+function createDayChoices(initialDate?: string): Array<{ value: string; label: string }> {
+  const days = upcomingDays();
+  if (
+    initialDate &&
+    !validateFutureDate(initialDate) &&
+    !days.some((day) => day.value === initialDate)
+  ) {
+    days.push(dayOption(initialDate));
+    days.sort((left, right) => left.value.localeCompare(right.value));
+  }
+  return days;
+}
+
+function initialSelectedDays(
+  days: Array<{ value: string }>,
+  initialDate?: string,
+): string[] {
+  if (initialDate && days.some((day) => day.value === initialDate)) {
+    return [initialDate];
+  }
+  return days.map((day) => day.value);
 }
 
 function todayDate(): string {
@@ -121,12 +149,12 @@ export function CreateShiftForm({
   initialDate,
 }: CreateShiftFormProps) {
   const editing = Boolean(shift);
-  const days = upcomingDays();
+  const days = editing ? upcomingDays() : createDayChoices(initialDate);
   const presets = getShiftPresets();
   const { signups } = useSchedule();
-  const [severalDays, setSeveralDays] = useState(!editing && !initialDate);
+  const [severalDays, setSeveralDays] = useState(!editing);
   const [selectedDays, setSelectedDays] = useState<string[]>(() =>
-    upcomingDays().map((day) => day.value),
+    editing ? [] : initialSelectedDays(createDayChoices(initialDate), initialDate),
   );
   const [selectedPresets, setSelectedPresets] = useState<string[]>([]);
   const [presetTimes, setPresetTimes] = useState<PresetTimes>(timesFromPresets);
@@ -219,7 +247,11 @@ export function CreateShiftForm({
     const nextErrors = validateCreateShift();
     setErrors(nextErrors);
     setNotice(null);
-    if (hasFieldErrors(nextErrors)) return;
+    if (hasFieldErrors(nextErrors)) {
+      const hidden = !editing ? nextErrors.date : undefined;
+      if (hidden) setNotice(hidden);
+      return;
+    }
     if (!editing && severalDays && selectedDays.length === 0) {
       setNotice("Pick at least one day.");
       return;
@@ -523,7 +555,6 @@ export function CreateShiftForm({
           label="Roles"
           name="roles"
           value={form.roles}
-          placeholder="Server, cook, or your own name"
           hint="Optional. Separate more than one with commas."
           error={touched.roles ? errors.roles : undefined}
           onChange={(event) => updateField("roles", event.target.value)}
