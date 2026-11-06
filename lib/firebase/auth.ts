@@ -21,6 +21,19 @@ googleProvider.setCustomParameters({ prompt: "select_account" });
 
 let redirectResultPromise: Promise<GoogleRedirectResult | null> | null = null;
 let awaitingGoogleConsumed: boolean | null = null;
+let pageShowBound = false;
+
+function bindGoogleRedirectPageShow() {
+  if (pageShowBound || typeof window === "undefined") return;
+  pageShowBound = true;
+  window.addEventListener("pageshow", (event) => {
+    if (!event.persisted) return;
+    if (window.localStorage.getItem(AWAITING_GOOGLE_KEY) !== "1") return;
+    window.location.reload();
+  });
+}
+
+bindGoogleRedirectPageShow();
 
 function readyAuth() {
   return getFirebaseAuth();

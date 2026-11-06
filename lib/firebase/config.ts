@@ -8,10 +8,45 @@ import {
   type Auth,
 } from "firebase/auth";
 
+function hostnameFromHost(host: string): string {
+  if (host.startsWith("[")) {
+    const end = host.indexOf("]");
+    return end === -1 ? host : host.slice(1, end);
+  }
+  return host.split(":")[0] ?? host;
+}
+
+function isLocalAuthHost(hostname: string): boolean {
+  if (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1") {
+    return true;
+  }
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(hostname)) return true;
+  return hostname.includes(":");
+}
+
+/**
+ * Phones block the Google redirect helper when it is loaded from firebaseapp.com
+ * while the app is on another domain. On a deployed site, use the page's own host
+ * and proxy /__/auth to Firebase (see next.config.ts).
+ */
+export function authDomainForHost(
+  configuredDomain: string,
+  pageHost: string | null | undefined,
+): string {
+  const configured = configuredDomain.trim();
+  if (!pageHost) return configured;
+  const hostname = hostnameFromHost(pageHost);
+  if (!hostname || isLocalAuthHost(hostname)) return configured;
+  return pageHost;
+}
+
 function getFirebaseConfig() {
   return {
     apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY?.trim() ?? "",
-    authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN?.trim() ?? "",
+    authDomain: authDomainForHost(
+      process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN?.trim() ?? "",
+      typeof window === "undefined" ? null : window.location.host,
+    ),
     projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID?.trim() ?? "",
     storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET?.trim() ?? "",
     messagingSenderId:

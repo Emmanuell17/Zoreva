@@ -167,7 +167,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             setRedirectError(
               isIpAddress(host)
                 ? getAuthErrorMessage({ code: "auth/unauthorized-domain" })
-                : "Google sign-in didn't finish. Try again and choose an account.",
+                : "Google sign-in didn't finish. Try again from this page and stay here until it returns.",
             );
           }
         })();
