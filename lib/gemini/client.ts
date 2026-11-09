@@ -12,7 +12,7 @@ const REQUEST_TIMEOUT_MS = 90_000;
 
 type GeminiErrorBody = {
   error?: {
-    code?: number;
+    code?: number | string;
     message?: string;
     status?: string;
     details?: Array<{ reason?: string }>;
@@ -26,7 +26,7 @@ function readError(body: unknown): { message: string; reason: string } | null {
   const reasons = (error.details ?? []).map((detail) => detail.reason ?? "");
   return {
     message: error.message ?? "",
-    reason: [error.status ?? "", ...reasons].join(" "),
+    reason: [error.status ?? "", typeof error.code === "string" ? error.code : "", ...reasons].join(" "),
   };
 }
 
@@ -122,12 +122,14 @@ export async function generateGeminiJson(
     systemInstruction: string;
     prompt: string;
     schema: Record<string, unknown>;
+    timeoutMs?: number;
   },
   signal?: AbortSignal,
 ): Promise<string> {
   const interaction = await geminiFetch<Interaction>("/v1beta/interactions", {
     method: "POST",
     signal,
+    timeoutMs: input.timeoutMs,
     body: JSON.stringify({
       model: input.model ?? getGeminiModel(),
       system_instruction: input.systemInstruction,

@@ -1,7 +1,7 @@
 export const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com";
 export const GEMINI_API_REVISION = "2026-05-20";
-const DEFAULT_MODEL = "gemini-3.8-flash";
-const DEFAULT_FALLBACK_MODEL = "gemini-3.5-flash-lite";
+const DEFAULT_MODEL = "gemini-3.5-flash-lite";
+const DEFAULT_FALLBACK_MODEL = "gemini-3.8-flash";
 
 function cleanEnv(raw: string | undefined): string | null {
   if (!raw) return null;
@@ -56,10 +56,10 @@ export class GeminiApiError extends Error {
 }
 
 export function geminiErrorKind(status: number, reason: string): GeminiApiError["kind"] {
-  if (status === 401 || status === 403 || /API_KEY_INVALID|PERMISSION_DENIED/.test(reason)) {
+  if (status === 401 || status === 403 || /API_KEY_INVALID|PERMISSION_DENIED|UNAUTHENTICATED/i.test(reason)) {
     return "invalid_credentials";
   }
-  if (status === 429 || status === 503 || /RESOURCE_EXHAUSTED|UNAVAILABLE/.test(reason)) {
+  if (status === 429 || status === 503 || /RESOURCE_EXHAUSTED|UNAVAILABLE/i.test(reason)) {
     return "busy";
   }
   return "http";

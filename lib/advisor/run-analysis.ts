@@ -3,6 +3,9 @@ import { GeminiApiError, getGeminiModels } from "@/lib/gemini/config";
 import { parseAdvisorAnalysis, type AdvisorAnalysis } from "@/lib/advisor/validate";
 import type { WorkforceTable } from "@/lib/workforce/parse";
 
+// Two attempts must fit inside the route's 120s maxDuration.
+const ATTEMPT_TIMEOUT_MS = 45_000;
+
 const SYSTEM_INSTRUCTION = [
   "You review workforce spreadsheets for Zoreva, a shift coordination app.",
   "Find missing information, inconsistent records, and staffing issues.",
@@ -72,14 +75,21 @@ export async function runWorkforceAnalysis(
   for (const [index, model] of models.entries()) {
     try {
       text = await generateGeminiJson(
-        { model, systemInstruction: SYSTEM_INSTRUCTION, prompt, schema: ANALYSIS_SCHEMA },
+        {
+          model,
+          systemInstruction: SYSTEM_INSTRUCTION,
+          prompt,
+          schema: ANALYSIS_SCHEMA,
+          timeoutMs: ATTEMPT_TIMEOUT_MS,
+        },
         signal,
       );
       break;
     } catch (error) {
-      const busy = error instanceof GeminiApiError && error.kind === "busy";
-      if (!busy || index === models.length - 1) throw error;
-      console.warn(`Gemini model ${model} is busy, trying ${models[index + 1]}:`, error.message);
+      const retryable =
+        error instanceof GeminiApiError && (error.kind === "busy" || error.kind === "timeout");
+      if (!retryable || index === models.length - 1) throw error;
+      console.warn(`Gemini model ${model} failed, trying ${models[index + 1]}:`, error.message);
     }
   }
 
