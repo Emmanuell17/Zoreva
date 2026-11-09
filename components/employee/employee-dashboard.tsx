@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { EmployeeNameCard } from "@/components/employee/employee-name-card";
 import { ShiftActionNotice } from "@/components/employee/shift-action-notice";
 import { PageHeader } from "@/components/layout/page-header";
 import { Badge } from "@/components/ui/badge";
@@ -246,6 +247,8 @@ export function EmployeeDashboard() {
             </Button>
           </Link>
         </div>
+
+        {loading ? null : <EmployeeNameCard />}
       </div>
     </div>
   );

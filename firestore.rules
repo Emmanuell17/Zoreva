@@ -459,14 +459,23 @@ service cloud.firestore {
             )
           );
 
-        allow update: if isManager(companyId)
-          && resource.data.role == 'EMPLOYEE'
-          && request.resource.data.role == 'EMPLOYEE'
-          && request.resource.data.id == resource.data.id
-          && request.resource.data.companyId == resource.data.companyId
-          && request.resource.data.keys().hasOnly([
-            'id', 'name', 'role', 'companyId', 'createdAt'
-          ])
+        allow update: if (
+            (
+              isManager(companyId)
+              && resource.data.role == 'EMPLOYEE'
+              && request.resource.data.role == 'EMPLOYEE'
+              && request.resource.data.id == resource.data.id
+              && request.resource.data.companyId == resource.data.companyId
+              && request.resource.data.keys().hasOnly([
+                'id', 'name', 'role', 'companyId', 'createdAt'
+              ])
+            )
+            || (
+              isEmployee(companyId)
+              && employeeId == memberData().employeeId
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name'])
+            )
+          )
           && request.resource.data.name is string
           && request.resource.data.name.size() > 0
           && request.resource.data.name.size() < 120;

@@ -892,6 +892,17 @@ export async function joinCompanyRemote(input: {
   return { companyId, employeeId };
 }
 
+export async function updateRosterNameRemote(
+  companyId: string,
+  employeeId: string,
+  name: string,
+): Promise<void> {
+  if (!canUseFirestore()) return;
+  await updateDoc(doc(getFirebaseFirestore(), "companies", companyId, "roster", employeeId), {
+    name,
+  });
+}
+
 function remoteBookingError(error: unknown): { ok: false; reason: string } {
   const code =
     typeof error === "object" && error !== null && "code" in error

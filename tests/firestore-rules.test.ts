@@ -233,6 +233,33 @@ test("ownership and roles cannot be changed by the client", async () => {
   await assertSucceeds(setDoc(doc(owner, "companies/co1"), companyData("owner1")));
 });
 
+test("employees can rename only themselves and change nothing else on the roster", async () => {
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    await setDoc(doc(context.firestore(), "companies/co1/roster/co1_other"), {
+      id: "co1_other",
+      name: "Alex",
+      role: "EMPLOYEE",
+      companyId: "co1",
+      createdAt: "2026-10-26T00:00:00.000Z",
+    });
+  });
+  const employee = testEnv.authenticatedContext("emp1", { email: "sam@cafe.test" }).firestore();
+  await assertSucceeds(updateDoc(doc(employee, "companies/co1/roster/co1_emp1"), { name: "Samantha" }));
+  await assertFails(updateDoc(doc(employee, "companies/co1/roster/co1_emp1"), { name: "" }));
+  await assertFails(
+    updateDoc(doc(employee, "companies/co1/roster/co1_emp1"), { name: "Sam", role: "ADMIN" }),
+  );
+  await assertFails(
+    updateDoc(doc(employee, "companies/co1/roster/co1_emp1"), { createdAt: "2020-01-01T00:00:00.000Z" }),
+  );
+  await assertFails(updateDoc(doc(employee, "companies/co1/roster/co1_other"), { name: "Taken" }));
+
+  const owner = testEnv.authenticatedContext("owner1", { email: "ada@cafe.test" }).firestore();
+  await assertSucceeds(updateDoc(doc(owner, "companies/co1/roster/co1_other"), { name: "Alexis" }));
+  const outsider = testEnv.authenticatedContext("owner2").firestore();
+  await assertFails(updateDoc(doc(outsider, "companies/co1/roster/co1_emp1"), { name: "Nope" }));
+});
+
 test("employees can write only their own signups and hours", async () => {
   const db = testEnv.authenticatedContext("emp1", { email: "sam@cafe.test" }).firestore();
   await assertFails(
