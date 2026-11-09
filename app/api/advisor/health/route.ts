@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 import { requireManager } from "@/lib/auth/require-manager";
-import { pingInfiniSynapse } from "@/lib/infinisynapse/client";
+import { checkGeminiModel } from "@/lib/gemini/client";
 import {
-  InfiniSynapseApiError,
-  isInfiniSynapseConfigured,
+  GeminiApiError,
+  isGeminiConfigured,
   publicErrorMessage,
-} from "@/lib/infinisynapse/config";
+} from "@/lib/gemini/config";
 
 export const dynamic = "force-dynamic";
 
@@ -15,25 +15,24 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: access.error }, { status: access.status });
   }
 
-  if (!isInfiniSynapseConfigured()) {
+  if (!isGeminiConfigured()) {
     return NextResponse.json(
       {
         configured: false,
         reachable: false,
         error:
-          "Set INFINISYNAPSE_API_KEY in the server environment. The key stays on the server.",
+          "Set GEMINI_API_KEY in the server environment. The key stays on the server.",
       },
       { status: 503 },
     );
   }
 
   try {
-    await pingInfiniSynapse();
+    await checkGeminiModel();
     return NextResponse.json({ configured: true, reachable: true });
   } catch (error) {
-    const invalid =
-      error instanceof InfiniSynapseApiError && error.kind === "invalid_credentials";
-    console.error("InfiniSynapse health check failed:", publicErrorMessage(error));
+    const invalid = error instanceof GeminiApiError && error.kind === "invalid_credentials";
+    console.error("Gemini health check failed:", publicErrorMessage(error));
     return NextResponse.json(
       {
         configured: true,

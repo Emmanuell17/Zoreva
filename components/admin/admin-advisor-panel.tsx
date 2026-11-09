@@ -21,7 +21,7 @@ type HealthResponse = {
 };
 
 function isBusyMessage(error: string | null | undefined): boolean {
-  return Boolean(error && (/busy/i.test(error) || /服务器繁忙/.test(error)));
+  return Boolean(error && /busy/i.test(error));
 }
 
 function formatBytes(size: number): string {
@@ -32,8 +32,8 @@ function formatBytes(size: number): string {
 
 function statusCopy(job: AdvisorJobPublic): { label: string; variant: "success" | "warning" | "pending" | "default" } {
   if (job.status === "completed") return { label: "Complete", variant: "success" };
-  if (job.status === "running" || job.status === "queued") return { label: "Running", variant: "pending" };
-  if (isBusyMessage(job.error)) return { label: "Compute busy", variant: "warning" };
+  if (job.status === "running") return { label: "Running", variant: "pending" };
+  if (isBusyMessage(job.error)) return { label: "Gemini busy", variant: "warning" };
   return { label: "Needs another try", variant: "warning" };
 }
 
@@ -49,7 +49,7 @@ export function AdminAdvisorPanel() {
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   const signedIn = Boolean(configured && user);
-  const busy = submitting || job?.status === "queued" || job?.status === "running";
+  const busy = submitting || job?.status === "running";
 
   useEffect(() => {
     if (!signedIn || !user) return;
@@ -105,23 +105,30 @@ export function AdminAdvisorPanel() {
     form.append("file", file);
     try {
       const token = await user.getIdToken();
+      setJob({
+        status: "running",
+        progress: "Gemini is reviewing the file…",
+        filename: file.name,
+        createdAt: new Date().toISOString(),
+        localFindings: null,
+        analysis: null,
+        error: null,
+      });
       const response = await fetch("/api/advisor/analyze", {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
         body: form,
         signal: abort.signal,
       });
-      if (!response.ok) {
-        const body = (await response.json().catch(() => null)) as { error?: string } | null;
+      const body = (await response.json().catch(() => null)) as
+        | { job?: AdvisorJobPublic; error?: string }
+        | null;
+      if (!response.ok || !body?.job) {
+        setJob(null);
         setError(body?.error ?? "Could not start the analysis.");
         return;
       }
-      if (!response.body) {
-        setError("Could not start the analysis.");
-        return;
-      }
-      await readAdvisorStream(response.body, setJob);
-      setJob((current) => failIfUnfinished(current, "The analysis stopped before it finished."));
+      setJob(body.job);
     } catch (caught) {
       const cancelled = caught instanceof Error && caught.name === "AbortError";
       setJob((current) =>
@@ -156,7 +163,7 @@ export function AdminAdvisorPanel() {
     <div className="flex flex-col gap-6">
       <PageHeader
         title="Operations advisor"
-        description="Drop in a roster or hours export. Zoreva checks the rows immediately. InfiniSynapse adds advisory findings and does not change the schedule."
+        description="Drop in a roster or hours export. Zoreva checks the rows immediately. Gemini adds advisory findings and does not change the schedule."
         actions={<ConnectionPill state={connection} />}
       />
 
@@ -215,13 +222,13 @@ export function AdminAdvisorPanel() {
           <CardHeader>
             <CardTitle>What happens next</CardTitle>
             <CardDescription>
-              Local checks stay in Zoreva. InfiniSynapse only writes the advisory report.
+              Local checks stay in Zoreva. Gemini only writes the advisory report.
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
             <ol className="flex flex-col gap-3 text-sm text-zinc-300">
               <Step n="1" title="Read the sheet" detail="Missing fields, bad rows, and staffing gaps." />
-              <Step n="2" title="Ask InfiniSynapse" detail="The same file, checked again as advice." />
+              <Step n="2" title="Ask Gemini" detail="The same file, checked again as advice." />
               <Step n="3" title="Leave the schedule alone" detail="Nothing here books, edits, or deletes a shift." />
             </ol>
             {error ? <p className="text-xs leading-relaxed text-red-300">{error}</p> : null}
@@ -274,7 +281,6 @@ export function AdminAdvisorPanel() {
               </div>
               <Badge variant={statusCopy(job).variant}>{statusCopy(job).label}</Badge>
             </div>
-            {busy ? <ProgressRail progress={job.progress} /> : null}
             {job.error ? (
               <div
                 role="status"
@@ -282,7 +288,7 @@ export function AdminAdvisorPanel() {
               >
                 <p className="text-sm font-medium text-amber-100">
                   {isBusyMessage(job.error)
-                    ? "InfiniSynapse is busy right now"
+                    ? "Gemini is busy right now"
                     : "The advisory pass did not finish"}
                 </p>
                 <p className="mt-1 text-sm leading-relaxed text-amber-100/80">{job.error}</p>
@@ -310,7 +316,7 @@ export function AdminAdvisorPanel() {
 
             {job.analysis ? (
               <FindingsCard
-                title="InfiniSynapse analysis"
+                title="Gemini analysis"
                 description="Validated advice. It does not change shifts, signups, or hours."
                 summary={job.analysis.summary}
                 groups={[
@@ -324,11 +330,6 @@ export function AdminAdvisorPanel() {
                   { title: "Staffing", items: job.analysis.staffingIssues },
                   { title: "Recommendations", items: job.analysis.recommendations },
                 ]}
-                footer={
-                  job.artifacts.length > 0
-                    ? `Workspace files: ${job.artifacts.join(", ")}`
-                    : undefined
-                }
               />
             ) : null}
           </div>
@@ -358,11 +359,11 @@ function connectionState({
   if (!health.reachable) {
     return {
       label: "Offline",
-      detail: health.error ?? "InfiniSynapse is not available yet.",
+      detail: health.error ?? "Gemini is not available yet.",
       tone: "warn",
     };
   }
-  return { label: "Ready", detail: "The advisor can reach InfiniSynapse.", tone: "ok" };
+  return { label: "Ready", detail: "The advisor can reach Gemini.", tone: "ok" };
 }
 
 function ConnectionPill({
@@ -407,53 +408,16 @@ function Hint({ title, detail }: { title: string; detail: string }) {
   );
 }
 
-function ProgressRail({ progress }: { progress: string }) {
-  const steps = ["Connect", "Upload", "Analyze", "Read results"];
-  const active = progressStep(progress);
-  return (
-    <ol className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-      {steps.map((step, index) => {
-        const done = index < active;
-        const current = index === active;
-        return (
-          <li
-            key={step}
-            className={`rounded-xl border px-3 py-2 text-xs ${
-              current
-                ? "border-foreground/40 bg-zinc-900 text-foreground"
-                : done
-                  ? "border-border text-zinc-300"
-                  : "border-border text-zinc-600"
-            }`}
-          >
-            {step}
-          </li>
-        );
-      })}
-    </ol>
-  );
-}
-
-function progressStep(progress: string): number {
-  const text = progress.toLowerCase();
-  if (text.includes("reading") || text.includes("result")) return 3;
-  if (text.includes("analy") || text.includes("busy") || text.includes("trying again")) return 2;
-  if (text.includes("upload")) return 1;
-  return 0;
-}
-
 function FindingsCard({
   title,
   description,
   summary,
   groups,
-  footer,
 }: {
   title: string;
   description: string;
   summary?: string;
   groups: Array<{ title: string; items: string[] }>;
-  footer?: string;
 }) {
   return (
     <Card className="rounded-2xl">
@@ -466,7 +430,6 @@ function FindingsCard({
         {groups.map((group) => (
           <FindingList key={group.title} title={group.title} items={group.items} />
         ))}
-        {footer ? <p className="text-xs text-zinc-600">{footer}</p> : null}
       </CardContent>
     </Card>
   );
@@ -483,28 +446,6 @@ function failIfUnfinished(
     progress: "Stopped",
     error: current.error ?? message,
   };
-}
-
-async function readAdvisorStream(
-  body: ReadableStream<Uint8Array>,
-  onJob: (job: AdvisorJobPublic) => void,
-) {
-  const reader = body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const chunks = buffer.split("\n\n");
-    buffer = chunks.pop() ?? "";
-    for (const chunk of chunks) {
-      const line = chunk.split("\n").find((item) => item.startsWith("data:"));
-      if (!line) continue;
-      onJob(JSON.parse(line.slice(5).trim()) as AdvisorJobPublic);
-    }
-  }
 }
 
 function FindingList({ title, items }: { title: string; items: string[] }) {
