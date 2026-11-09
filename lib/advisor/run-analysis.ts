@@ -1,5 +1,5 @@
 import { generateGeminiJson } from "@/lib/gemini/client";
-import { GeminiApiError } from "@/lib/gemini/config";
+import { GeminiApiError, getGeminiModels } from "@/lib/gemini/config";
 import { parseAdvisorAnalysis, type AdvisorAnalysis } from "@/lib/advisor/validate";
 import type { WorkforceTable } from "@/lib/workforce/parse";
 
@@ -60,19 +60,28 @@ export async function runWorkforceAnalysis(
   table: WorkforceTable,
   signal?: AbortSignal,
 ): Promise<AdvisorAnalysis> {
-  const text = await generateGeminiJson(
-    {
-      systemInstruction: SYSTEM_INSTRUCTION,
-      prompt: [
-        `File "${table.filename}" (${table.rows.length} data rows):`,
-        "```csv",
-        tableAsCsv(table),
-        "```",
-      ].join("\n"),
-      schema: ANALYSIS_SCHEMA,
-    },
-    signal,
-  );
+  const prompt = [
+    `File "${table.filename}" (${table.rows.length} data rows):`,
+    "```csv",
+    tableAsCsv(table),
+    "```",
+  ].join("\n");
+
+  const models = getGeminiModels();
+  let text = "";
+  for (const [index, model] of models.entries()) {
+    try {
+      text = await generateGeminiJson(
+        { model, systemInstruction: SYSTEM_INSTRUCTION, prompt, schema: ANALYSIS_SCHEMA },
+        signal,
+      );
+      break;
+    } catch (error) {
+      const busy = error instanceof GeminiApiError && error.kind === "busy";
+      if (!busy || index === models.length - 1) throw error;
+      console.warn(`Gemini model ${model} is busy, trying ${models[index + 1]}:`, error.message);
+    }
+  }
 
   const analysis = parseAdvisorAnalysis(text);
   if (!analysis) {

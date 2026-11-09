@@ -1,6 +1,7 @@
 export const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com";
 export const GEMINI_API_REVISION = "2026-05-20";
 const DEFAULT_MODEL = "gemini-3.8-flash";
+const DEFAULT_FALLBACK_MODEL = "gemini-3.5-flash-lite";
 
 function cleanEnv(raw: string | undefined): string | null {
   if (!raw) return null;
@@ -18,6 +19,14 @@ export function getGeminiApiKey(): string | null {
 
 export function getGeminiModel(): string {
   return cleanEnv(process.env.GEMINI_MODEL)?.replace(/^models\//, "") ?? DEFAULT_MODEL;
+}
+
+/** Models to try in order. Each Gemini model has its own free-tier quota. */
+export function getGeminiModels(): string[] {
+  const fallback =
+    cleanEnv(process.env.GEMINI_FALLBACK_MODEL)?.replace(/^models\//, "") ??
+    DEFAULT_FALLBACK_MODEL;
+  return [...new Set([getGeminiModel(), fallback])];
 }
 
 export function isGeminiConfigured(): boolean {
@@ -63,7 +72,8 @@ export function publicErrorMessage(error: unknown): string {
       return "Gemini rejected the server API key. Replace GEMINI_API_KEY and try again.";
     }
     if (error.kind === "busy") {
-      return "Gemini is busy or the free-tier limit was reached. The Zoreva checks below still stand. Try again in a minute.";
+      const detail = error.message ? ` Google said: "${error.message.slice(0, 300)}"` : "";
+      return `Gemini is busy or the free-tier limit was reached. The Zoreva checks below still stand.${detail}`;
     }
     if (error.kind === "timeout") {
       return "Gemini timed out before the analysis finished.";

@@ -118,6 +118,7 @@ export async function checkGeminiModel(): Promise<void> {
 
 export async function generateGeminiJson(
   input: {
+    model?: string;
     systemInstruction: string;
     prompt: string;
     schema: Record<string, unknown>;
@@ -128,7 +129,7 @@ export async function generateGeminiJson(
     method: "POST",
     signal,
     body: JSON.stringify({
-      model: getGeminiModel(),
+      model: input.model ?? getGeminiModel(),
       system_instruction: input.systemInstruction,
       input: input.prompt,
       response_format: {
