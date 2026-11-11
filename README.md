@@ -6,7 +6,9 @@ Zoreva is a mobile-first shift coordination app. Managers open shifts. Employees
 
 Frontend MVP built with **Next.js 16**, **React 19**, **TypeScript**, **Tailwind CSS 4**, and **Firebase Authentication**.
 
-[Live app](#getting-started) · [Architecture](#architecture) · [What this demonstrates](#what-this-demonstrates)
+The live site is [zorevashift.xyz](https://zorevashift.xyz).
+
+[Live app](https://zorevashift.xyz) · [Architecture](#architecture) · [What this demonstrates](#what-this-demonstrates)
 
 ---
 
@@ -154,14 +156,14 @@ npm install
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000).
+Open [http://localhost:3000](http://localhost:3000). The public site is [https://zorevashift.xyz](https://zorevashift.xyz).
 
 ### Firebase (optional for browsing, required for Google sign-in)
 
 1. Create a project in the [Firebase Console](https://console.firebase.google.com/).
 2. Add a **Web** app and copy the config values.
 3. Enable **Authentication → Sign-in method → Google**.
-4. Add `localhost` under Authentication → Settings → Authorized domains.
+4. Add `localhost` and `zorevashift.xyz` under Authentication → Settings → Authorized domains. `localhost` is for local sign-in; `zorevashift.xyz` is the live site.
 5. Copy `.env.example` to `.env.local` and fill in the keys.
 6. Restart `npm run dev`.
 7. On **Register**, pick Employee or Admin, then **Continue with Google**.
