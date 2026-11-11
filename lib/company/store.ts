@@ -18,6 +18,7 @@ import {
   migrateManagerWorkspaceRemote,
   syncEmployeeActivityRemote,
   updatePublishedScheduleRemote,
+  updateRosterNameRemote,
   watchEmployeeWorkspace,
   watchManagerWorkspace,
 } from "@/lib/company/cloud";
@@ -207,6 +208,46 @@ export function getActiveEmployees(): User[] {
     return activeCompany.employees.map((employee) => ({ ...employee }));
   }
   return usersSeed.map((user) => ({ ...user }));
+}
+
+export const MAX_NAME_LENGTH = 80;
+
+export async function updateOwnName(
+  name: string,
+): Promise<{ ok: true; name: string } | { ok: false; reason: string }> {
+  const trimmed = name.trim().replace(/\s+/g, " ");
+  if (!trimmed) return { ok: false, reason: "Enter your name." };
+  if (trimmed.length > MAX_NAME_LENGTH) {
+    return { ok: false, reason: `Keep your name under ${MAX_NAME_LENGTH} characters.` };
+  }
+  const company = activeCompany;
+  if (!company) return { ok: false, reason: "Join a company first." };
+  const employeeId = currentEmployeeId;
+  if (!company.employees.some((employee) => employee.id === employeeId)) {
+    return { ok: false, reason: "Your profile was not found. Sign out and back in." };
+  }
+
+  if (canUseFirestore() && session) {
+    if (session.role !== "EMPLOYEE" || session.employeeId !== employeeId) {
+      return { ok: false, reason: "Only employees can change their name here." };
+    }
+    try {
+      await updateRosterNameRemote(session.companyId, employeeId, trimmed);
+    } catch {
+      return { ok: false, reason: "Could not save your name. Check your connection and try again." };
+    }
+  }
+
+  if (activeCompany?.id === company.id) {
+    activeCompany = saveCompanyLocal({
+      ...activeCompany,
+      employees: activeCompany.employees.map((employee) =>
+        employee.id === employeeId ? { ...employee, name: trimmed } : employee,
+      ),
+    });
+    notify();
+  }
+  return { ok: true, name: trimmed };
 }
 
 export function registerScheduleBridge(bridge: ScheduleBridge) {

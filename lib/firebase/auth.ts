@@ -58,15 +58,31 @@ export function isIpAddress(hostname: string): boolean {
   return hostname.includes(":");
 }
 
-export function usesRedirectGoogleSignIn(): boolean {
-  if (typeof window === "undefined") return false;
-  const ua = navigator.userAgent || "";
+export function prefersRedirectGoogleSignIn(
+  userAgent: string,
+  maxTouchPoints = 0,
+): boolean {
+  const ua = userAgent || "";
   const iOS =
     /iPad|iPhone|iPod/.test(ua) ||
-    (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+    (/Macintosh/.test(ua) && maxTouchPoints > 1);
   if (iOS || /Android/i.test(ua)) return true;
-  return /FBAN|FBAV|Instagram|Line\/|TikTok|Snapchat|Twitter|LinkedInApp|WhatsApp|MicroMessenger/i.test(
-    ua,
+  if (
+    /FBAN|FBAV|Instagram|Line\/|TikTok|Snapchat|Twitter|LinkedInApp|WhatsApp|MicroMessenger/i.test(
+      ua,
+    )
+  ) {
+    return true;
+  }
+  // Desktop Safari drops the Google popup. Chrome's user agent also contains "Safari".
+  return /Safari/i.test(ua) && !/Chrome|Chromium|CriOS|Edg\/|OPR\/|FxiOS/i.test(ua);
+}
+
+export function usesRedirectGoogleSignIn(): boolean {
+  if (typeof window === "undefined") return false;
+  return prefersRedirectGoogleSignIn(
+    navigator.userAgent || "",
+    navigator.maxTouchPoints,
   );
 }
 

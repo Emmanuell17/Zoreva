@@ -1,5 +1,13 @@
 import type { Company, User } from "@/types";
 
+/** Setup creates `${companyId}_emp_N` placeholders; real joins use `${companyId}_${uid}`. */
+export function isJoinedMember(employee: User, companyId: string): boolean {
+  if (employee.role !== "EMPLOYEE") return false;
+  if (employee.authUid) return true;
+  const prefix = `${companyId}_emp_`;
+  return !(employee.id.startsWith(prefix) && /^\d+$/.test(employee.id.slice(prefix.length)));
+}
+
 export function attachAuthEmployee(
   company: Company,
   profile: { userId: string; name: string; email: string },

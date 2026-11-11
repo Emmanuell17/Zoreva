@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useSyncExternalStore } from "react";
 import { CreateShiftForm } from "@/components/admin/create-shift-form";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -10,7 +10,7 @@ import { Modal } from "@/components/ui/modal";
 import { useCompany } from "@/hooks/use-company";
 import { useInitialLoading } from "@/hooks/use-initial-loading";
 import { useSchedule } from "@/hooks/use-schedule";
-import { formatJoinCode } from "@/lib/company/join-code";
+import { formatJoinCode, joinPathForCode } from "@/lib/company/join-code";
 import { getEmployeeName } from "@/lib/services";
 import {
   assignEmployee,
@@ -74,6 +74,12 @@ export function AdminShiftsPanel() {
   const coverage = coverageForShifts(weekShifts, signups);
   const draftCount = weekShifts.filter((shift) => shift.status === "draft").length;
   const joinCode = company?.joinCode ? formatJoinCode(company.joinCode) : "";
+  const origin = useSyncExternalStore(
+    () => () => {},
+    () => window.location.origin,
+    () => "",
+  );
+  const inviteLink = joinCode && origin ? `${origin}${joinPathForCode(joinCode)}` : "";
   const staff = (company?.employees ?? []).filter((employee) => employee.role !== "ADMIN");
   const thisWeek = weekStartKey(new Date());
 
@@ -126,6 +132,14 @@ export function AdminShiftsPanel() {
                 {joinCode}
               </span>
               <CopyButton text={joinCode} label="Copy" variant="ghost" />
+              {inviteLink ? (
+                <CopyButton
+                  text={inviteLink}
+                  label="Copy invite link"
+                  copiedLabel="Link copied"
+                  variant="ghost"
+                />
+              ) : null}
             </p>
           ) : null}
         </div>

@@ -13,6 +13,7 @@ export const employeeNav: NavItem[] = [
 
 export const adminNav: NavItem[] = [
   { href: "/admin", label: "Shifts" },
+  { href: "/admin/team", label: "Team" },
   { href: "/admin/availability", label: "Time off" },
   { href: "/admin/hours", label: "Hours" },
   { href: "/admin/history", label: "History" },

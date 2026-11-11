@@ -6,7 +6,9 @@ Zoreva is a mobile-first shift coordination app. Managers open shifts. Employees
 
 Frontend MVP built with **Next.js 16**, **React 19**, **TypeScript**, **Tailwind CSS 4**, and **Firebase Authentication**.
 
-[Live app](#getting-started) · [Architecture](#architecture) · [What this demonstrates](#what-this-demonstrates)
+The live site is [zorevashift.xyz](https://zorevashift.xyz).
+
+[Live app](https://zorevashift.xyz) · [Architecture](#architecture) · [What this demonstrates](#what-this-demonstrates)
 
 ---
 
@@ -102,7 +104,7 @@ This is a portfolio product, not a production multi-tenant SaaS. It is written s
 | `/join` · `/join/[code]` | Employee | Join a company with a manager’s code |
 | `/employee/*` | Employee | Home, choose, schedule, hours, reminders |
 | `/admin/*` | Manager | Shifts, hours, history, advisor |
-| `/api/advisor/*` | Server | Operations Advisor jobs (InfiniSynapse, key stays on the server) |
+| `/api/advisor/*` | Server | Operations Advisor (Gemini, key stays on the server) |
 
 Auth is Firebase. Role is stored locally after sign-in so the client can route to the right shell. Company setup creates a workspace keyed to the manager’s owner id. Employees join with a code. Schedule changes write back into that workspace in Firestore (and a local cache).
 
@@ -128,13 +130,13 @@ Without Firebase env vars the UI still loads, which keeps local browsing and UI 
 
 ```text
 app/                 Route groups: landing, auth, setup, join, employee, admin
-app/api/advisor/     Advisor endpoints (analyze, status, cancel, health)
+app/api/advisor/     Advisor endpoints (analyze, health)
 components/          Feature UI (landing, auth, admin, employee, setup, join, shifts, layout)
 hooks/               Schedule and company subscriptions
 lib/company/         Workspace build, Firestore + local persistence, join codes
 lib/services/        Schedule commands and queries
-lib/advisor/         In-memory advisor job store
-lib/infinisynapse/   Server-only InfiniSynapse adapter
+lib/advisor/         Advisor prompt and result validation
+lib/gemini/          Server-only Gemini adapter
 lib/workforce/       Workforce file parsing and local checks
 lib/firebase/        Auth + Firestore client config
 lib/validation.ts    Shared form rules
@@ -154,25 +156,28 @@ npm install
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000).
+Open [http://localhost:3000](http://localhost:3000). The public site is [https://zorevashift.xyz](https://zorevashift.xyz).
 
 ### Firebase (optional for browsing, required for Google sign-in)
 
 1. Create a project in the [Firebase Console](https://console.firebase.google.com/).
 2. Add a **Web** app and copy the config values.
 3. Enable **Authentication → Sign-in method → Google**.
-4. Add `localhost` under Authentication → Settings → Authorized domains.
+4. Add `localhost` and `zorevashift.xyz` under Authentication → Settings → Authorized domains. `localhost` is for local sign-in; `zorevashift.xyz` is the live site.
 5. Copy `.env.example` to `.env.local` and fill in the keys.
 6. Restart `npm run dev`.
 7. On **Register**, pick Employee or Admin, then **Continue with Google**.
 
-### InfiniSynapse (Operations Advisor)
+### Gemini (Operations Advisor)
 
-The API key is **server-only**. Put it in `.env.local` as `INFINISYNAPSE_API_KEY` (never `NEXT_PUBLIC_…`). Full setup, production env vars, and a manual test are in [docs/INFINISYNAPSE.md](docs/INFINISYNAPSE.md).
+1. Create a free API key at [Google AI Studio](https://aistudio.google.com/apikey). No card is needed.
+2. Put it in `.env.local` as `GEMINI_API_KEY` (never `NEXT_PUBLIC_…`). The key is **server-only**.
+3. For production, add the same `GEMINI_API_KEY` in Vercel → Project → Settings → Environment Variables, then redeploy.
+
+On the free tier Google may use submitted data to improve its products. Turn on billing for the AI Studio project if uploaded rosters must stay out of that.
 
 ```bash
 npm run test:advisor
-npm run test:infinisynapse
 npm run lint
 npm run build
 npm run start
@@ -188,7 +193,7 @@ npm run start
 - Manager setup, shift CRUD, confirmation overview, submitted hours
 - Firebase Google authentication
 - Firestore workspaces shared between a manager and their team
-- InfiniSynapse operations advisor for uploaded workforce CSV/Excel (advisory only)
+- Gemini operations advisor for uploaded workforce CSV/Excel (advisory only)
 - In-app reminders derived from live shift state
 
 **Intentionally not in this MVP**
