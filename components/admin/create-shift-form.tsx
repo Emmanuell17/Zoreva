@@ -10,10 +10,8 @@ import { calendarDayKey, isSameShiftSlot, signupsForShift } from "@/lib/shift-ut
 import { cn } from "@/lib/utils";
 import {
   hasFieldErrors,
-  parsePositions,
   validateFutureDate,
   validateOptionalNote,
-  validatePositions,
   validateSlots,
   validateTimeRange,
   type FieldErrors,
@@ -34,8 +32,6 @@ type CreateShiftFormProps = {
   initialDate?: string;
 };
 
-const ROLE_CHOICES = ["Server", "Cook", "Barista", "Cashier"];
-
 type FormState = {
   date: string;
   startTime: string;
@@ -43,10 +39,9 @@ type FormState = {
   slots: string;
   label: string;
   note: string;
-  roles: string;
 };
 
-type CreateShiftFields = "date" | "startTime" | "endTime" | "slots" | "note" | "roles";
+type CreateShiftFields = "date" | "startTime" | "endTime" | "slots" | "note";
 
 function toDateValue(date: Date): string {
   const year = date.getFullYear();
@@ -113,7 +108,6 @@ function getDefaultFormState(date?: string): FormState {
     slots: String(preset.slots),
     label: preset.label,
     note: "",
-    roles: "",
   };
 }
 
@@ -136,7 +130,6 @@ function formStateFromShift(shift: Shift): FormState {
     slots: String(shift.slots),
     label: shift.label ?? "",
     note: shift.note ?? "",
-    roles: (shift.positions ?? []).join(", "),
   };
 }
 
@@ -215,7 +208,6 @@ export function CreateShiftForm({
       endTime: (severalDays || usingPresets) && !editing ? undefined : timeErrors.endTime,
       slots: validateSlots(nextForm.slots),
       note: validateOptionalNote(nextForm.note),
-      roles: validatePositions(nextForm.roles),
     } satisfies FieldErrors<CreateShiftFields>;
   }
 
@@ -241,7 +233,6 @@ export function CreateShiftForm({
       endTime: true,
       slots: true,
       note: true,
-      roles: true,
     });
 
     const nextErrors = validateCreateShift();
@@ -271,7 +262,7 @@ export function CreateShiftForm({
 
     const slots = Number(form.slots);
     const note = form.note.trim() || null;
-    const roles = parsePositions(form.roles);
+    const positions = editing && shift ? [...(shift.positions ?? [])] : [];
 
     if (editing && shift) {
       const taken = signupsForShift(signups, shift.id).length;
@@ -290,7 +281,7 @@ export function CreateShiftForm({
         slots,
         label: form.label.trim() || null,
         note,
-        positions: roles,
+        positions,
       };
 
       const duplicate = getScheduleSnapshot().shifts.some(
@@ -337,7 +328,7 @@ export function CreateShiftForm({
               slots,
               label: preset.label,
               note,
-              positions: roles,
+              positions,
             })),
           )
         : [
@@ -348,7 +339,7 @@ export function CreateShiftForm({
               slots,
               label: form.label.trim() || null,
               note,
-              positions: roles,
+              positions,
             },
           ];
 
@@ -518,47 +509,6 @@ export function CreateShiftForm({
           error={touched.slots ? errors.slots : undefined}
           onChange={(event) => updateField("slots", event.target.value)}
           onBlur={() => setTouched((current) => ({ ...current, slots: true }))}
-        />
-
-        <div className="flex flex-col gap-1.5">
-          <p className="text-xs font-medium text-zinc-400">Role (optional)</p>
-          <div className="flex flex-wrap gap-2">
-            {ROLE_CHOICES.map((role) => {
-              const selected = parsePositions(form.roles).some(
-                (item) => item.toLowerCase() === role.toLowerCase(),
-              );
-              return (
-                <button
-                  key={role}
-                  type="button"
-                  onClick={() => {
-                    const current = parsePositions(form.roles);
-                    const next = selected
-                      ? current.filter((item) => item.toLowerCase() !== role.toLowerCase())
-                      : [...current, role];
-                    updateField("roles", next.join(", "));
-                  }}
-                  className={cn(
-                    "rounded-full border px-3 py-1 text-xs",
-                    selected
-                      ? "border-zinc-500 bg-zinc-900 text-foreground"
-                      : "border-border text-zinc-400",
-                  )}
-                >
-                  {role}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-        <Input
-          label="Roles"
-          name="roles"
-          value={form.roles}
-          hint="Optional. Separate more than one with commas."
-          error={touched.roles ? errors.roles : undefined}
-          onChange={(event) => updateField("roles", event.target.value)}
-          onBlur={() => setTouched((current) => ({ ...current, roles: true }))}
         />
 
         {editing ? (
