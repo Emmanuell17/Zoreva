@@ -40,7 +40,7 @@ import {
 import { normalizeJoinCode } from "@/lib/company/join-code";
 import { canUseFirestore } from "@/lib/firebase/firestore";
 import { redactCompanyForMember } from "@/lib/security/policy";
-import { isShiftDatePassed } from "@/lib/shift-utils";
+import { prunePassedSchedule } from "@/lib/shift-utils";
 import { buildCompanyWorkspace } from "@/lib/company/build-workspace";
 import type {
   AvailabilityWindow,
@@ -107,19 +107,7 @@ function stopWatch() {
 }
 
 function withoutPassedShifts(company: Company, now = new Date()): Company | null {
-  const expired = new Set(
-    company.shifts
-      .filter((shift) => isShiftDatePassed(shift.date, now))
-      .map((shift) => shift.id),
-  );
-  if (expired.size === 0) return null;
-
-  return {
-    ...company,
-    shifts: company.shifts.filter((shift) => !expired.has(shift.id)),
-    signups: company.signups.filter((signup) => !expired.has(signup.shiftId)),
-    hours: company.hours.filter((entry) => !expired.has(entry.shiftId)),
-  };
+  return prunePassedSchedule(company, now);
 }
 
 function dropPassedShifts() {
