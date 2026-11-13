@@ -10,6 +10,7 @@ import {
   getActiveCompany,
   getBookingSession,
   getCurrentEmployeeId,
+  flushScheduleSave,
   persistActiveSchedule,
   registerScheduleBridge,
 } from "@/lib/company/store";
@@ -479,7 +480,14 @@ export async function publishWeek(
     const company = getActiveCompany();
     const session = getBookingSession();
     if (company && session?.role === "ADMIN" && session.companyId === company.id) {
-      await syncShiftOpeningsRemote(company.id, drafts, signups, company.timezone);
+      try {
+        await syncShiftOpeningsRemote(company.id, drafts, signups, company.timezone, { fail: true });
+      } catch {
+        return {
+          ok: false,
+          reason: "Could not publish the week. Check your connection and try again.",
+        };
+      }
       for (const shift of drafts) {
         for (const employeeId of shift.assigneeIds ?? []) {
           const saved = await assignEmployeeRemote(company.id, employeeId, shift.id);
@@ -498,6 +506,8 @@ export async function publishWeek(
     return { ok: false, reason: "This week has no draft shifts to publish." };
   }
   notify();
+  const saved = await flushScheduleSave();
+  if (!saved.ok) return saved;
   return { ok: true, published };
 }
 

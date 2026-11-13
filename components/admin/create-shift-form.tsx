@@ -1,10 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
 import { useSchedule } from "@/hooks/use-schedule";
+import { flushScheduleSave } from "@/lib/company/store";
+import { defaultSelectedDays, shiftsToCreate } from "@/lib/shifts/create-defaults";
 import { getShiftPresets } from "@/lib/shift-presets";
 import { calendarDayKey, isSameShiftSlot, signupsForShift } from "@/lib/shift-utils";
 import { cn } from "@/lib/utils";
@@ -23,7 +25,13 @@ import type { Shift } from "@/types";
 type CreateShiftFormProps = {
   open: boolean;
   onClose: () => void;
-  onCreate: (input: CreateShiftInput[]) => void;
+  onCreate: (
+    input: CreateShiftInput[],
+  ) =>
+    | void
+    | { ok: true }
+    | { ok: false; reason: string }
+    | Promise<void | { ok: true } | { ok: false; reason: string }>;
   shift?: Shift | null;
   onUpdate?: (
     shiftId: string,
@@ -89,10 +97,10 @@ function initialSelectedDays(
   days: Array<{ value: string }>,
   initialDate?: string,
 ): string[] {
-  if (initialDate && days.some((day) => day.value === initialDate)) {
-    return [initialDate];
-  }
-  return days.map((day) => day.value);
+  return defaultSelectedDays(
+    days.map((day) => day.value),
+    initialDate,
+  );
 }
 
 function todayDate(): string {
@@ -145,7 +153,7 @@ export function CreateShiftForm({
   const days = editing ? upcomingDays() : createDayChoices(initialDate);
   const presets = getShiftPresets();
   const { signups } = useSchedule();
-  const [severalDays, setSeveralDays] = useState(!editing);
+  const [severalDays, setSeveralDays] = useState(false);
   const [selectedDays, setSelectedDays] = useState<string[]>(() =>
     editing ? [] : initialSelectedDays(createDayChoices(initialDate), initialDate),
   );
@@ -158,6 +166,7 @@ export function CreateShiftForm({
   const [errors, setErrors] = useState<FieldErrors<CreateShiftFields>>({});
   const [touched, setTouched] = useState<Partial<Record<CreateShiftFields, boolean>>>({});
   const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false);
   const [notice, setNotice] = useState<string | null>(null);
 
   function updateField<K extends keyof FormState>(key: K, value: FormState[K]) {
@@ -213,8 +222,8 @@ export function CreateShiftForm({
 
   function handleClose() {
     setForm(getDefaultFormState());
-    setSeveralDays(true);
-    setSelectedDays(days.map((day) => day.value));
+    setSeveralDays(false);
+    setSelectedDays(initialSelectedDays(days, initialDate));
     setSelectedPresets([]);
     setPresetTimes(timesFromPresets());
     setPresetTimeErrors({});
@@ -227,6 +236,7 @@ export function CreateShiftForm({
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (submittingRef.current) return;
     setTouched({
       date: true,
       startTime: true,
@@ -257,9 +267,9 @@ export function CreateShiftForm({
       if (Object.values(nextPresetErrors).some(Boolean)) return;
     }
 
+    submittingRef.current = true;
     setSubmitting(true);
-    await new Promise((resolve) => window.setTimeout(resolve, 200));
-
+    try {
     const slots = Number(form.slots);
     const note = form.note.trim() || null;
     const positions = editing && shift ? [...(shift.positions ?? [])] : [];
@@ -270,7 +280,6 @@ export function CreateShiftForm({
         setNotice(
           `${taken} ${taken === 1 ? "person has" : "people have"} already chosen this shift. Keep at least ${taken} spots.`,
         );
-        setSubmitting(false);
         return;
       }
 
@@ -289,14 +298,17 @@ export function CreateShiftForm({
       );
       if (duplicate) {
         setNotice("That shift already exists for this day and time.");
-        setSubmitting(false);
         return;
       }
 
       const result = onUpdate?.(shift.id, input) ?? { ok: true as const };
       if (!result.ok) {
         setNotice(result.reason);
-        setSubmitting(false);
+        return;
+      }
+      const saved = await flushScheduleSave();
+      if (!saved.ok) {
+        setNotice(saved.reason);
         return;
       }
 
@@ -349,42 +361,46 @@ export function CreateShiftForm({
     );
     const duplicateCount = inputs.length - fresh.length;
 
-    if (severalDays || selectedTimes.length > 0) {
-      if (fresh.length === 0) {
-        setNotice("Those shifts are already on the week.");
-        setSubmitting(false);
-        return;
-      }
-      onCreate(fresh);
-      handleClose();
+    if (fresh.length === 0 && duplicateCount > 0) {
+      setNotice(
+        severalDays || selectedTimes.length > 0
+          ? "Those shifts are already on the week."
+          : "That shift already exists for this day and time.",
+      );
       return;
     }
 
-    if (duplicateCount > 0 && fresh.length === 0) {
-      setNotice("That shift already exists for this day and time.");
-      setSubmitting(false);
+    const created = await onCreate(fresh);
+    if (created && "ok" in created && !created.ok) {
+      setNotice(created.reason);
       return;
-    }
-
-    if (fresh.length > 0) {
-      onCreate(fresh);
     }
 
     if (duplicateCount > 0) {
       setNotice(
         `Added ${fresh.length}. ${duplicateCount} already existed and ${duplicateCount === 1 ? "was" : "were"} skipped.`,
       );
-      setSubmitting(false);
       return;
     }
 
     handleClose();
+    } finally {
+      submittingRef.current = false;
+      setSubmitting(false);
+    }
   }
 
-  const createCount =
-    !editing && selectedPresets.length > 0
-      ? (severalDays ? selectedDays.length : 1) * selectedPresets.length
-      : 1;
+  const createCount = editing
+    ? 1
+    : shiftsToCreate({
+        severalDays,
+        selectedDayCount: selectedDays.length,
+        presetCount: selectedPresets.length,
+      });
+  const dayChoices =
+    editing || !form.date || days.some((day) => day.value === form.date)
+      ? days
+      : [...days, dayOption(form.date)].sort((left, right) => left.value.localeCompare(right.value));
 
   return (
     <Modal
@@ -394,7 +410,9 @@ export function CreateShiftForm({
       description={
         editing
           ? "Change the day, time, name, or how many people are needed."
-          : "Pick the days, then tap the shifts to open."
+          : severalDays
+            ? "Choose the days and times. Each combination is its own draft shift."
+            : "Add one draft shift. Turn on several days only when you mean to."
       }
     >
       <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-4">
@@ -437,29 +455,87 @@ export function CreateShiftForm({
           </>
         ) : (
           <>
-            <div className="flex flex-col gap-1.5">
-              <p className="text-xs font-medium text-zinc-400">Days</p>
-              <div className="grid grid-cols-2 gap-2">
-                {days.map((day) => {
-                  const selected = selectedDays.includes(day.value);
-                  return (
-                    <button
-                      key={day.value}
-                      type="button"
-                      onClick={() => toggleDay(day.value)}
-                      className={cn(
-                        "rounded-md border px-3 py-2 text-left text-sm",
-                        selected
-                          ? "border-zinc-500 bg-zinc-900 text-foreground"
-                          : "border-border text-zinc-400",
-                      )}
-                    >
-                      {day.label}
-                    </button>
-                  );
-                })}
+            <button
+              type="button"
+              onClick={() => {
+                setSeveralDays((current) => {
+                  const next = !current;
+                  if (next) {
+                    const day = form.date || todayDate();
+                    setSelectedDays(dayChoices.some((item) => item.value === day) ? [day] : initialSelectedDays(dayChoices));
+                  }
+                  return next;
+                });
+              }}
+              className={cn(
+                "rounded-md border px-3 py-2 text-left text-sm",
+                severalDays
+                  ? "border-zinc-500 bg-zinc-900 text-foreground"
+                  : "border-border text-zinc-400",
+              )}
+            >
+              {severalDays ? "Creating one shift for each chosen day" : "Add this shift on more than one day"}
+            </button>
+            {severalDays ? (
+              <div className="flex flex-col gap-1.5">
+                <p className="text-xs font-medium text-zinc-400">Days</p>
+                <div className="grid grid-cols-2 gap-2">
+                  {dayChoices.map((day) => {
+                    const selected = selectedDays.includes(day.value);
+                    return (
+                      <button
+                        key={day.value}
+                        type="button"
+                        onClick={() => toggleDay(day.value)}
+                        className={cn(
+                          "rounded-md border px-3 py-2 text-left text-sm",
+                          selected
+                            ? "border-zinc-500 bg-zinc-900 text-foreground"
+                            : "border-border text-zinc-400",
+                        )}
+                      >
+                        {day.label}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
-            </div>
+            ) : (
+              <>
+                <Input
+                  label="Date"
+                  name="date"
+                  type="date"
+                  value={form.date}
+                  error={touched.date ? errors.date : undefined}
+                  onChange={(event) => updateField("date", event.target.value)}
+                  onBlur={() => setTouched((current) => ({ ...current, date: true }))}
+                />
+                {selectedPresets.length === 0 ? (
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <Input
+                      label="Start"
+                      name="startTime"
+                      type="time"
+                      value={form.startTime}
+                      error={touched.startTime ? errors.startTime : undefined}
+                      onChange={(event) => updateField("startTime", event.target.value)}
+                      onBlur={() => setTouched((current) => ({ ...current, startTime: true }))}
+                    />
+                    <Input
+                      label="End"
+                      name="endTime"
+                      type="time"
+                      value={form.endTime}
+                      hint="An earlier end time finishes the next morning."
+                      error={touched.endTime ? errors.endTime : undefined}
+                      onChange={(event) => updateField("endTime", event.target.value)}
+                      onBlur={() => setTouched((current) => ({ ...current, endTime: true }))}
+                    />
+                  </div>
+                ) : null}
+              </>
+            )}
             <div className="flex flex-col gap-1.5">
               <p className="text-xs font-medium text-zinc-400">Shifts</p>
               <div className="flex flex-col gap-2">
@@ -550,7 +626,7 @@ export function CreateShiftForm({
           >
             Cancel
           </Button>
-          <Button type="submit" size="sm" loading={submitting}>
+          <Button type="submit" size="sm" loading={submitting} disabled={!editing && createCount === 0}>
             {submitting
               ? editing
                 ? "Saving…"
@@ -562,13 +638,11 @@ export function CreateShiftForm({
                   : "Create shift"}
           </Button>
         </div>
-        {!editing && selectedPresets.length > 0 ? (
-          <p className="text-right text-xs text-zinc-500">
-            {severalDays ? selectedDays.length : 1}{" "}
-            {(severalDays ? selectedDays.length : 1) === 1 ? "day" : "days"} ×{" "}
-            {selectedPresets.length}{" "}
-            {selectedPresets.length === 1 ? "time" : "times"}
-            {` (${selectedPresets.join(", ")})`}
+        {!editing ? (
+          <p className="text-right text-xs text-zinc-500" role="status">
+            {createCount === 0
+              ? "Pick at least one day and one time."
+              : `This will create ${createCount} ${createCount === 1 ? "shift" : "shifts"}.`}
           </p>
         ) : null}
       </form>
