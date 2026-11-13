@@ -8,7 +8,7 @@ import { CopyButton } from "@/components/ui/copy-button";
 import { LoadingState } from "@/components/ui/loading-state";
 import { Modal } from "@/components/ui/modal";
 import { ScheduleSaveBanner } from "@/components/schedule/schedule-save-banner";
-import { flushScheduleSave } from "@/lib/company/store";
+import { flushScheduleSave, getScheduleSaveStatus } from "@/lib/company/store";
 import { useCompany } from "@/hooks/use-company";
 import { useInitialLoading } from "@/hooks/use-initial-loading";
 import { useSchedule } from "@/hooks/use-schedule";
@@ -354,13 +354,21 @@ export function AdminShiftsPanel() {
           setCreateOpen(false);
           setEditingShift(null);
         }}
-        onCreate={(inputs: CreateShiftInput[]) => {
+        onCreate={async (inputs: CreateShiftInput[]) => {
+          const failedBefore = getScheduleSaveStatus().phase === "failed";
           const created = createShifts(inputs);
+          const saved = await flushScheduleSave();
+          if (!saved.ok) return saved;
+          if (created.length === 0 && !failedBefore) {
+            return { ok: false, reason: "Those shifts are already on the rota." };
+          }
+          const count = created.length;
           setNotice(
-            created.length === 0
-              ? "Those shifts are already on the rota."
-              : `Saved ${created.length} draft ${created.length === 1 ? "shift" : "shifts"}. Publish the week when you are ready.`,
+            count === 0
+              ? "Saved."
+              : `Saved ${count} draft ${count === 1 ? "shift" : "shifts"}. Publish the week when you are ready.`,
           );
+          return { ok: true };
         }}
         onUpdate={(shiftId, input) => updateShift(shiftId, input)}
       />
