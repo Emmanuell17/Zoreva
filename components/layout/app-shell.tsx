@@ -2,6 +2,7 @@ import { MobileNav } from "@/components/layout/mobile-nav";
 import { Navbar } from "@/components/layout/navbar";
 import { PageContainer } from "@/components/layout/page-container";
 import { Sidebar } from "@/components/layout/sidebar";
+import { WorkspaceLoadError } from "@/components/layout/workspace-load-error";
 import type { NavItem } from "@/lib/navigation";
 
 type AppShellProps = {
@@ -30,7 +31,10 @@ export function AppShell({
         />
         <MobileNav navItems={navItems} homeHref={homeHref} />
         <main className="flex flex-1 flex-col overflow-y-auto">
-          <PageContainer>{children}</PageContainer>
+          <PageContainer>
+            <WorkspaceLoadError />
+            {children}
+          </PageContainer>
         </main>
       </div>
     </div>

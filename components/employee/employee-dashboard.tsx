@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRef, useState } from "react";
 import { EmployeeNameCard } from "@/components/employee/employee-name-card";
 import { ShiftActionNotice } from "@/components/employee/shift-action-notice";
 import { PageHeader } from "@/components/layout/page-header";
@@ -38,6 +39,9 @@ export function EmployeeDashboard() {
   const employeeId = useCurrentEmployeeId();
   const { shifts, signups, hours } = useSchedule();
   const { pending, error, success, canRetry, run, retry } = useShiftCommand();
+  const [hoursError, setHoursError] = useState<string | null>(null);
+  const hoursLock = useRef(false);
+  const [savingHours, setSavingHours] = useState(false);
 
   const mine = signups.filter((signup) => signup.employeeId === employeeId);
   const myUpcoming = mine
@@ -116,16 +120,32 @@ export function EmployeeDashboard() {
               </CardDescription>
             </CardHeader>
             <CardContent className="flex flex-col gap-2">
+              {hoursError ? (
+                <p role="alert" className="text-sm text-red-300">
+                  {hoursError}
+                </p>
+              ) : null}
               <Button
                 size="lg"
                 className="w-full"
-                onClick={() =>
-                  submitHours({
-                    shiftId: hoursNow.shift.id,
-                    startTime: hoursNow.shift.startTime,
-                    endTime: hoursNow.shift.endTime,
-                  })
-                }
+                disabled={savingHours}
+                onClick={() => {
+                  const shift = hoursNow.shift;
+                  void (async () => {
+                    if (hoursLock.current) return;
+                    hoursLock.current = true;
+                    setSavingHours(true);
+                    setHoursError(null);
+                    const result = await submitHours({
+                      shiftId: shift.id,
+                      startTime: shift.startTime,
+                      endTime: shift.endTime,
+                    });
+                    hoursLock.current = false;
+                    setSavingHours(false);
+                    if (!result.ok) setHoursError(result.reason);
+                  })();
+                }}
               >
                 Hours were as scheduled
               </Button>

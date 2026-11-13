@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -22,6 +22,7 @@ export function EmployeeNameCard() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const saveLock = useRef(false);
 
   if (!company || !current) return null;
 
@@ -29,10 +30,12 @@ export function EmployeeNameCard() {
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
-    if (draft === null) return;
+    if (draft === null || saveLock.current) return;
+    saveLock.current = true;
     setSaving(true);
     setError(null);
     const result = await updateOwnName(draft);
+    saveLock.current = false;
     setSaving(false);
     if (!result.ok) {
       setError(result.reason);

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
@@ -38,8 +38,15 @@ function HoursFormInner({
   const [errors, setErrors] = useState<FieldErrors<"startTime" | "endTime" | "note">>({});
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const submitLock = useRef(false);
+
+  function requestClose() {
+    if (submitLock.current) return;
+    onClose();
+  }
 
   async function save(nextStart: string, nextEnd: string) {
+    if (submitLock.current) return;
     const timeErrors = validateTimeRange(nextStart, nextEnd);
     const nextErrors = {
       ...timeErrors,
@@ -48,11 +55,11 @@ function HoursFormInner({
     setErrors(nextErrors);
     if (hasFieldErrors(nextErrors)) return;
 
+    submitLock.current = true;
     setSubmitting(true);
     setError(null);
-    await new Promise((resolve) => window.setTimeout(resolve, 250));
 
-    const result = submitHours({
+    const result = await submitHours({
       shiftId: shift.id,
       startTime: nextStart,
       endTime: nextEnd,
@@ -62,16 +69,18 @@ function HoursFormInner({
     if (!result.ok) {
       setError(result.reason);
       setSubmitting(false);
+      submitLock.current = false;
       return;
     }
 
+    submitLock.current = false;
     onClose();
   }
 
   return (
     <Modal
       open
-      onClose={onClose}
+      onClose={requestClose}
       title="Enter hours"
       description={`${formatDayLabel(shift.date)} · ${formatTimeRange(shift.startTime, shift.endTime)}`}
     >

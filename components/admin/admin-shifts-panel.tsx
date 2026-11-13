@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useSyncExternalStore } from "react";
+import { useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { CreateShiftForm } from "@/components/admin/create-shift-form";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -53,7 +53,9 @@ export function AdminShiftsPanel() {
   const [editingShift, setEditingShift] = useState<Shift | null>(null);
   const [assigning, setAssigning] = useState<Shift | null>(null);
   const [confirming, setConfirming] = useState<ConfirmAction | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [notice, setNotice] = useState<{ text: string; error: boolean } | null>(null);
+  const confirmLock = useRef(false);
+  const assignLock = useRef(false);
   const [assignError, setAssignError] = useState<string | null>(null);
   const [assignWarning, setAssignWarning] = useState<{
     employeeId: string;
@@ -91,28 +93,44 @@ export function AdminShiftsPanel() {
   }
 
   async function runConfirm() {
-    if (!confirming) return;
-    if (confirming.kind === "remove") {
-      const result = removeShift(confirming.shift.id);
-      setNotice(result.ok ? "Shift removed." : result.reason);
+    if (!confirming || confirmLock.current) return;
+    confirmLock.current = true;
+    const action = confirming;
+    try {
+      if (action.kind === "remove") {
+        const result = await removeShift(action.shift.id);
+        setNotice(
+          result.ok
+            ? { text: "Shift removed.", error: false }
+            : { text: result.reason, error: true },
+        );
+      }
+      if (action.kind === "copy") {
+        const result = await copyPreviousWeek(weekStart);
+        setNotice(
+          result.ok
+            ? {
+                text: `Copied ${result.created} ${result.created === 1 ? "shift" : "shifts"} as a draft.`,
+                error: false,
+              }
+            : { text: result.reason, error: true },
+        );
+      }
+      if (action.kind === "publish") {
+        const result = await publishWeek(weekStart);
+        setNotice(
+          result.ok
+            ? {
+                text: `Published ${result.published} ${result.published === 1 ? "shift" : "shifts"}. Your team can see them now.`,
+                error: false,
+              }
+            : { text: result.reason, error: true },
+        );
+      }
+      setConfirming(null);
+    } finally {
+      confirmLock.current = false;
     }
-    if (confirming.kind === "copy") {
-      const result = copyPreviousWeek(weekStart);
-      setNotice(
-        result.ok
-          ? `Copied ${result.created} ${result.created === 1 ? "shift" : "shifts"} as a draft.`
-          : result.reason,
-      );
-    }
-    if (confirming.kind === "publish") {
-      const result = await publishWeek(weekStart);
-      setNotice(
-        result.ok
-          ? `Published ${result.published} ${result.published === 1 ? "shift" : "shifts"}. Your team can see them now.`
-          : result.reason,
-      );
-    }
-    setConfirming(null);
   }
 
   return (
@@ -191,10 +209,14 @@ export function AdminShiftsPanel() {
 
       {notice ? (
         <p
-          role="status"
-          className="mb-4 rounded-md border border-border bg-surface px-3 py-2 text-sm text-zinc-300"
+          role={notice.error ? "alert" : "status"}
+          className={
+            notice.error
+              ? "mb-4 rounded-md border border-red-900/80 bg-red-950/40 px-3 py-2 text-sm text-red-200"
+              : "mb-4 rounded-md border border-border bg-surface px-3 py-2 text-sm text-zinc-300"
+          }
         >
-          {notice}
+          {notice.text}
         </p>
       ) : null}
 
@@ -333,20 +355,34 @@ export function AdminShiftsPanel() {
           setCreateOpen(false);
           setEditingShift(null);
         }}
-        onCreate={(inputs: CreateShiftInput[]) => {
-          const created = createShifts(inputs);
-          setNotice(
-            created.length === 0
-              ? "Those shifts are already on the rota."
-              : `Saved ${created.length} draft ${created.length === 1 ? "shift" : "shifts"}. Publish the week when you are ready.`,
-          );
+        onCreate={async (inputs: CreateShiftInput[]) => {
+          const created = await createShifts(inputs);
+          if (!created.ok) {
+            setNotice({ text: created.reason, error: true });
+            return created;
+          }
+          if (created.created.length === 0) {
+            return { ok: false, reason: "Those shifts are already on the rota." };
+          }
+          setNotice({
+            text: `Saved ${created.created.length} draft ${created.created.length === 1 ? "shift" : "shifts"}. Publish the week when you are ready.`,
+            error: false,
+          });
+          return { ok: true };
         }}
-        onUpdate={(shiftId, input) => updateShift(shiftId, input)}
+        onUpdate={async (shiftId, input) => {
+          const result = await updateShift(shiftId, input);
+          if (!result.ok) setNotice({ text: result.reason, error: true });
+          return result;
+        }}
       />
 
       <Modal
         open={Boolean(assigning)}
-        onClose={() => setAssigning(null)}
+        onClose={() => {
+          if (assignLock.current) return;
+          setAssigning(null);
+        }}
         title="Assign people"
         description={
           assigning
@@ -369,51 +405,57 @@ export function AdminShiftsPanel() {
                       variant={assigned ? "secondary" : "primary"}
                       onClick={() => {
                         void (async () => {
-                        if (assigned) {
-                          const removed = await unassignEmployee(assigning.id, employee.id);
-                          if (!removed.ok) {
-                            setAssignError(removed.reason);
-                            return;
-                          }
-                          setAssignError(null);
-                          setAssignWarning(null);
-                          setAssigning((current) =>
-                            current
-                              ? {
-                                  ...current,
-                                  assigneeIds: (current.assigneeIds ?? []).filter((id) => id !== employee.id),
-                                }
-                              : current,
-                          );
-                          return;
-                        }
-                        const result = await assignEmployee(assigning.id, employee.id);
-                        if (!result.ok) {
-                          if (result.level === "warn") {
-                            setAssignError(null);
-                            setAssignWarning({
-                              employeeId: employee.id,
-                              name: employee.name,
-                              reasons: result.warnings,
-                            });
-                            return;
-                          }
-                          setAssignWarning(null);
-                          setAssignError(result.reason);
-                          return;
-                        }
-                        setAssignError(null);
-                        setAssignWarning(null);
-                        setAssigning((current) =>
-                          current
-                            ? {
-                                ...current,
-                                assigneeIds: assigned
-                                  ? (current.assigneeIds ?? []).filter((id) => id !== employee.id)
-                                  : [...(current.assigneeIds ?? []), employee.id],
+                          if (assignLock.current) return;
+                          assignLock.current = true;
+                          try {
+                            if (assigned) {
+                              const removed = await unassignEmployee(assigning.id, employee.id);
+                              if (!removed.ok) {
+                                setAssignError(removed.reason);
+                                return;
                               }
-                            : current,
-                        );
+                              setAssignError(null);
+                              setAssignWarning(null);
+                              setAssigning((current) =>
+                                current
+                                  ? {
+                                      ...current,
+                                      assigneeIds: (current.assigneeIds ?? []).filter(
+                                        (id) => id !== employee.id,
+                                      ),
+                                    }
+                                  : current,
+                              );
+                              return;
+                            }
+                            const result = await assignEmployee(assigning.id, employee.id);
+                            if (!result.ok) {
+                              if (result.level === "warn") {
+                                setAssignError(null);
+                                setAssignWarning({
+                                  employeeId: employee.id,
+                                  name: employee.name,
+                                  reasons: result.warnings,
+                                });
+                                return;
+                              }
+                              setAssignWarning(null);
+                              setAssignError(result.reason);
+                              return;
+                            }
+                            setAssignError(null);
+                            setAssignWarning(null);
+                            setAssigning((current) =>
+                              current
+                                ? {
+                                    ...current,
+                                    assigneeIds: [...(current.assigneeIds ?? []), employee.id],
+                                  }
+                                : current,
+                            );
+                          } finally {
+                            assignLock.current = false;
+                          }
                         })();
                       }}
                     >
@@ -437,8 +479,10 @@ export function AdminShiftsPanel() {
                   <Button
                     size="sm"
                     onClick={() => {
-                      if (!assigning) return;
+                      if (!assigning || assignLock.current) return;
                       void (async () => {
+                      assignLock.current = true;
+                      try {
                       const result = await assignEmployee(assigning.id, assignWarning.employeeId, {
                         acknowledgeWarnings: true,
                       });
@@ -455,6 +499,9 @@ export function AdminShiftsPanel() {
                           ? { ...current, assigneeIds: [...(current.assigneeIds ?? []), employeeId] }
                           : current,
                       );
+                      } finally {
+                        assignLock.current = false;
+                      }
                       })();
                     }}
                   >
@@ -477,7 +524,10 @@ export function AdminShiftsPanel() {
 
       <Modal
         open={Boolean(confirming)}
-        onClose={() => setConfirming(null)}
+        onClose={() => {
+          if (confirmLock.current) return;
+          setConfirming(null);
+        }}
         title={
           confirming?.kind === "publish"
             ? "Publish this week?"

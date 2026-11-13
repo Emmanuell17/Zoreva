@@ -90,10 +90,33 @@ function buildSnapshot(): ScheduleSnapshot {
   };
 }
 
-function notify() {
+const SAVE_FAILED = "Could not save that. Check your connection and try again.";
+
+let commitQueue: Promise<void> = Promise.resolve();
+
+function enqueue<T>(task: () => Promise<T>): Promise<T> {
+  const run = commitQueue.then(task, task);
+  commitQueue = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
+}
+
+async function commitMutation(): Promise<{ ok: true } | { ok: false; reason: string }> {
+  const previous = snapshot;
+  try {
+    await persistActiveSchedule(buildSnapshot());
+  } catch {
+    shifts = previous.shifts.map((shift) => ({ ...shift }));
+    signups = previous.signups.map((signup) => ({ ...signup }));
+    hours = previous.hours.map((entry) => ({ ...entry }));
+    snapshot = buildSnapshot();
+    return { ok: false, reason: SAVE_FAILED };
+  }
   snapshot = buildSnapshot();
-  persistActiveSchedule(snapshot);
   listeners.forEach((listener) => listener());
+  return { ok: true };
 }
 
 function rememberSignup(signup: ShiftSignup) {
@@ -266,42 +289,49 @@ function managerDenied(): { ok: false; reason: string } | null {
   return { ok: false, reason: "Only a manager can change the rota." };
 }
 
-export function createShifts(inputs: CreateShiftInput[]): Shift[] {
-  if (managerDenied()) return [];
-  const uniqueInputs: CreateShiftInput[] = [];
+export function createShifts(
+  inputs: CreateShiftInput[],
+): Promise<{ ok: true; created: Shift[] } | { ok: false; reason: string }> {
+  return enqueue(async () => {
+    const denied = managerDenied();
+    if (denied) return denied;
+    const uniqueInputs: CreateShiftInput[] = [];
 
-  for (const input of inputs) {
-    const alreadyListed = uniqueInputs.some((item) => isSameShiftSlot(item, input));
-    const alreadySaved = shifts.some((shift) => isSameShiftSlot(shift, input));
-    if (alreadyListed || alreadySaved) continue;
-    uniqueInputs.push(input);
-  }
+    for (const input of inputs) {
+      const alreadyListed = uniqueInputs.some((item) => isSameShiftSlot(item, input));
+      const alreadySaved = shifts.some((shift) => isSameShiftSlot(shift, input));
+      if (alreadyListed || alreadySaved) continue;
+      uniqueInputs.push(input);
+    }
 
-  if (uniqueInputs.length === 0) return [];
+    if (uniqueInputs.length === 0) return { ok: true, created: [] };
 
-  const created = uniqueInputs.map((input, index) => ({
-    id: `shift_${Date.now()}_${index}`,
-    date: input.date,
-    startTime: input.startTime,
-    endTime: input.endTime,
-    slots: input.slots,
-    label: input.label?.trim() || null,
-    note: input.note?.trim() || null,
-    positions: input.positions?.length ? [...input.positions] : null,
-    assigneeIds: [] as string[],
-    status: "draft" as const,
-    createdAt: new Date().toISOString(),
-  }));
+    const created = uniqueInputs.map((input, index) => ({
+      id: `shift_${Date.now()}_${index}`,
+      date: input.date,
+      startTime: input.startTime,
+      endTime: input.endTime,
+      slots: input.slots,
+      label: input.label?.trim() || null,
+      note: input.note?.trim() || null,
+      positions: input.positions?.length ? [...input.positions] : null,
+      assigneeIds: [] as string[],
+      status: "draft" as const,
+      createdAt: new Date().toISOString(),
+    }));
 
-  shifts = [...shifts, ...created];
-  notify();
-  return created;
+    shifts = [...shifts, ...created];
+    const saved = await commitMutation();
+    if (!saved.ok) return saved;
+    return { ok: true, created };
+  });
 }
 
 export function updateShift(
   shiftId: string,
   input: CreateShiftInput,
-): { ok: true } | { ok: false; reason: string } {
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  return enqueue(async () => {
   const denied = managerDenied();
   if (denied) return denied;
   const existing = getShiftById(shiftId);
@@ -343,13 +373,14 @@ export function updateShift(
       positions: input.positions?.length ? [...input.positions] : null,
     };
   });
-  notify();
-  return { ok: true };
+  return commitMutation();
+  });
 }
 
 export function removeShift(
   shiftId: string,
-): { ok: true } | { ok: false; reason: string } {
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  return enqueue(async () => {
   const denied = managerDenied();
   if (denied) return denied;
   const shift = getShiftById(shiftId);
@@ -365,8 +396,8 @@ export function removeShift(
   }
 
   shifts = shifts.filter((item) => item.id !== shiftId);
-  notify();
-  return { ok: true };
+  return commitMutation();
+  });
 }
 
 function businessZone(): string {
@@ -431,7 +462,8 @@ export async function assignEmployee(
       ? { ...item, assigneeIds: [...(item.assigneeIds ?? []), employeeId] }
       : item,
   );
-  notify();
+  const mirrored = await commitMutation();
+  if (!mirrored.ok) return { ok: false, level: "block", warnings: [], reason: mirrored.reason };
   return { ok: true };
 }
 
@@ -459,8 +491,7 @@ export async function unassignEmployee(
         }
       : item,
   );
-  notify();
-  return { ok: true };
+  return commitMutation();
 }
 
 export async function publishWeek(
@@ -497,13 +528,15 @@ export async function publishWeek(
   if (published === 0) {
     return { ok: false, reason: "This week has no draft shifts to publish." };
   }
-  notify();
+  const saved = await commitMutation();
+  if (!saved.ok) return saved;
   return { ok: true, published };
 }
 
 export function copyPreviousWeek(
   weekStart: string,
-): { ok: true; created: number; skipped: number } | { ok: false; reason: string } {
+): Promise<{ ok: true; created: number; skipped: number } | { ok: false; reason: string }> {
+  return enqueue(async () => {
   const denied = managerDenied();
   if (denied) return denied;
   const result = duplicateWeek({
@@ -522,8 +555,10 @@ export function copyPreviousWeek(
     };
   }
   shifts = [...shifts, ...result.created];
-  notify();
+  const saved = await commitMutation();
+  if (!saved.ok) return saved;
   return { ok: true, created: result.created.length, skipped: result.skipped };
+  });
 }
 
 function storedSignup(signup: ShiftSignup): BookedSignup {
@@ -542,10 +577,12 @@ function storedSignup(signup: ShiftSignup): BookedSignup {
   };
 }
 
-function applySavedSignup(signup: ShiftSignup) {
+async function applySavedSignup(
+  signup: ShiftSignup,
+): Promise<{ ok: true } | { ok: false; reason: string }> {
   rememberSignup(signup);
   upsertSignup(signup);
-  notify();
+  return commitMutation();
 }
 
 export async function selectShift(
@@ -605,7 +642,10 @@ export async function selectShift(
       knownIds,
     );
     if (!result.ok) return result;
-    if (result.signup) applySavedSignup(asSignup(result.signup));
+    if (result.signup) {
+      const saved = await applySavedSignup(asSignup(result.signup));
+      if (!saved.ok) return saved;
+    }
     return result;
   }
 
@@ -637,7 +677,8 @@ export async function selectShift(
     selectedAt: decision.selectedAt,
     confirmedAt: null,
   };
-  applySavedSignup(signup);
+  const saved = await applySavedSignup(signup);
+  if (!saved.ok) return saved;
   return { ok: true, signup: storedSignup(signup) };
 }
 
@@ -668,7 +709,8 @@ export async function leaveShift(
     signups = signups.filter(
       (signup) => signup.shiftId !== shiftId || signup.employeeId !== employeeId,
     );
-    notify();
+    const saved = await commitMutation();
+    if (!saved.ok) return saved;
     return result;
   }
 
@@ -691,7 +733,10 @@ export async function leaveShift(
   signups = signups.filter(
     (signup) => signup.shiftId !== shiftId || signup.employeeId !== employeeId,
   );
-  if (!decision.alreadyCancelled) notify();
+  if (!decision.alreadyCancelled) {
+    const saved = await commitMutation();
+    if (!saved.ok) return saved;
+  }
   return { ok: true, alreadyCancelled: decision.alreadyCancelled, signup: null };
 }
 
@@ -712,7 +757,10 @@ export async function confirmShift(
       knownId,
     );
     if (!result.ok) return result;
-    if (result.signup) applySavedSignup(asSignup(result.signup));
+    if (result.signup) {
+      const saved = await applySavedSignup(asSignup(result.signup));
+      if (!saved.ok) return saved;
+    }
     return result;
   }
 
@@ -734,40 +782,42 @@ export async function confirmShift(
     status: "CONFIRMED",
     confirmedAt: new Date().toISOString(),
   };
-  applySavedSignup(confirmed);
+  const saved = await applySavedSignup(confirmed);
+  if (!saved.ok) return saved;
   return { ok: true, signup: storedSignup(confirmed) };
 }
 
 export function submitHours(
   input: SubmitHoursInput,
-): { ok: true } | { ok: false; reason: string } {
-  const employeeId = input.employeeId ?? getCurrentEmployeeId();
-  const shift = getShiftById(input.shiftId);
-  if (!shift) return { ok: false, reason: "Shift not found." };
-  if (!isPastShift(shift, new Date(), businessZone())) {
-    return { ok: false, reason: "Enter hours after the shift ends." };
-  }
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  return enqueue(async () => {
+    const employeeId = input.employeeId ?? getCurrentEmployeeId();
+    const shift = getShiftById(input.shiftId);
+    if (!shift) return { ok: false, reason: "Shift not found." };
+    if (!isPastShift(shift, new Date(), businessZone())) {
+      return { ok: false, reason: "Enter hours after the shift ends." };
+    }
 
-  const signup = getSignupForShift(input.shiftId, employeeId);
-  if (!signup) {
-    return { ok: false, reason: "You were not on this shift." };
-  }
-  if (hoursForSignup(hours, input.shiftId, employeeId)) {
-    return { ok: false, reason: "Hours already entered for this shift." };
-  }
+    const signup = getSignupForShift(input.shiftId, employeeId);
+    if (!signup) {
+      return { ok: false, reason: "You were not on this shift." };
+    }
+    if (hoursForSignup(hours, input.shiftId, employeeId)) {
+      return { ok: false, reason: "Hours already entered for this shift." };
+    }
 
-  const entry: HoursEntry = {
-    id: `hours_${Date.now()}`,
-    shiftId: input.shiftId,
-    employeeId,
-    startTime: input.startTime,
-    endTime: input.endTime,
-    note: input.note?.trim() || null,
-    status: "SUBMITTED",
-    submittedAt: new Date().toISOString(),
-  };
+    const entry: HoursEntry = {
+      id: `hours_${Date.now()}`,
+      shiftId: input.shiftId,
+      employeeId,
+      startTime: input.startTime,
+      endTime: input.endTime,
+      note: input.note?.trim() || null,
+      status: "SUBMITTED",
+      submittedAt: new Date().toISOString(),
+    };
 
-  hours = [...hours, entry];
-  notify();
-  return { ok: true };
+    hours = [...hours, entry];
+    return commitMutation();
+  });
 }

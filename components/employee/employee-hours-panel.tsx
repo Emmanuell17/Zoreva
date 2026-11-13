@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { EmployeeHoursForm } from "@/components/employee/employee-hours-form";
 import { PageHeader } from "@/components/layout/page-header";
 import { ShiftCard } from "@/components/shifts/shift-card";
@@ -26,6 +26,24 @@ export function EmployeeHoursPanel() {
   const employeeId = useCurrentEmployeeId();
   const { shifts, signups, hours } = useSchedule();
   const [target, setTarget] = useState<Shift | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const savingId = useRef<string | null>(null);
+  const [savingShiftId, setSavingShiftId] = useState<string | null>(null);
+
+  async function saveScheduled(shift: Shift) {
+    if (savingId.current) return;
+    savingId.current = shift.id;
+    setSavingShiftId(shift.id);
+    setError(null);
+    const result = await submitHours({
+      shiftId: shift.id,
+      startTime: shift.startTime,
+      endTime: shift.endTime,
+    });
+    savingId.current = null;
+    setSavingShiftId(null);
+    if (!result.ok) setError(result.reason);
+  }
 
   const past = signups
     .filter((signup) => signup.employeeId === employeeId)
@@ -54,6 +72,12 @@ export function EmployeeHoursPanel() {
         description="Enter the hours you worked after a shift ends."
       />
 
+      {error ? (
+        <p role="alert" className="mb-4 rounded-md border border-red-900/80 bg-red-950/40 px-3 py-2 text-sm text-red-200">
+          {error}
+        </p>
+      ) : null}
+
       <div className="grid gap-8">
         <section>
           <h3 className="mb-3 text-sm font-medium tracking-tight text-foreground">
@@ -79,19 +103,15 @@ export function EmployeeHoursPanel() {
                     <Button
                       size="lg"
                       className="w-full sm:w-auto"
-                      onClick={() =>
-                        submitHours({
-                          shiftId: shift.id,
-                          startTime: shift.startTime,
-                          endTime: shift.endTime,
-                        })
-                      }
+                      disabled={savingShiftId !== null}
+                      onClick={() => void saveScheduled(shift)}
                     >
                       Hours were as scheduled
                     </Button>
                     <Button
                       size="sm"
                       variant="ghost"
+                      disabled={savingShiftId !== null}
                       onClick={() => setTarget(shift)}
                     >
                       Different hours

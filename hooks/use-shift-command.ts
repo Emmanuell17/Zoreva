@@ -12,10 +12,12 @@ export function useShiftCommand() {
   const [success, setSuccess] = useState<string | null>(null);
   const [canRetry, setCanRetry] = useState(false);
   const retryRef = useRef<(() => Promise<void>) | null>(null);
+  const pendingRef = useRef<string | null>(null);
 
   const run = useCallback(
     async (key: string, action: () => Promise<ShiftCommandResult>) => {
-      if (pending) return;
+      if (pendingRef.current) return;
+      pendingRef.current = key;
       setPending(key);
       setError(null);
       setSuccess(null);
@@ -35,10 +37,11 @@ export function useShiftCommand() {
         retryRef.current = () => run(key, action);
         setCanRetry(true);
       } finally {
+        pendingRef.current = null;
         setPending(null);
       }
     },
-    [pending],
+    [],
   );
 
   const retry = useCallback(() => {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
@@ -25,12 +25,14 @@ import type { Shift } from "@/types";
 type CreateShiftFormProps = {
   open: boolean;
   onClose: () => void;
-  onCreate: (input: CreateShiftInput[]) => void;
+  onCreate: (
+    input: CreateShiftInput[],
+  ) => Promise<{ ok: true } | { ok: false; reason: string }>;
   shift?: Shift | null;
   onUpdate?: (
     shiftId: string,
     input: CreateShiftInput,
-  ) => { ok: true } | { ok: false; reason: string };
+  ) => Promise<{ ok: true } | { ok: false; reason: string }>;
   initialDate?: string;
 };
 
@@ -166,6 +168,7 @@ export function CreateShiftForm({
   const [touched, setTouched] = useState<Partial<Record<CreateShiftFields, boolean>>>({});
   const [submitting, setSubmitting] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const submitLock = useRef(false);
 
   function updateField<K extends keyof FormState>(key: K, value: FormState[K]) {
     const nextForm = { ...form, [key]: value };
@@ -220,6 +223,7 @@ export function CreateShiftForm({
   }
 
   function handleClose() {
+    if (submitLock.current) return;
     setForm(getDefaultFormState());
     setSeveralDays(true);
     setSelectedDays(days.map((day) => day.value));
@@ -235,6 +239,7 @@ export function CreateShiftForm({
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (submitLock.current) return;
     setTouched({
       date: true,
       startTime: true,
@@ -266,8 +271,8 @@ export function CreateShiftForm({
       if (Object.values(nextPresetErrors).some(Boolean)) return;
     }
 
+    submitLock.current = true;
     setSubmitting(true);
-    await new Promise((resolve) => window.setTimeout(resolve, 200));
 
     const slots = Number(form.slots);
     const note = form.note.trim() || null;
@@ -280,6 +285,7 @@ export function CreateShiftForm({
           `${taken} ${taken === 1 ? "person has" : "people have"} already chosen this shift. Keep at least ${taken} spots.`,
         );
         setSubmitting(false);
+        submitLock.current = false;
         return;
       }
 
@@ -299,16 +305,19 @@ export function CreateShiftForm({
       if (duplicate) {
         setNotice("That shift already exists for this day and time.");
         setSubmitting(false);
+        submitLock.current = false;
         return;
       }
 
-      const result = onUpdate?.(shift.id, input) ?? { ok: true as const };
+      const result = onUpdate ? await onUpdate(shift.id, input) : { ok: true as const };
       if (!result.ok) {
         setNotice(result.reason);
         setSubmitting(false);
+        submitLock.current = false;
         return;
       }
 
+      submitLock.current = false;
       handleClose();
       return;
     }
@@ -362,9 +371,17 @@ export function CreateShiftForm({
       if (fresh.length === 0) {
         setNotice("Those shifts are already on the week.");
         setSubmitting(false);
+        submitLock.current = false;
         return;
       }
-      onCreate(fresh);
+      const created = await onCreate(fresh);
+      if (!created.ok) {
+        setNotice(created.reason);
+        setSubmitting(false);
+        submitLock.current = false;
+        return;
+      }
+      submitLock.current = false;
       handleClose();
       return;
     }
@@ -372,11 +389,18 @@ export function CreateShiftForm({
     if (duplicateCount > 0 && fresh.length === 0) {
       setNotice("That shift already exists for this day and time.");
       setSubmitting(false);
+      submitLock.current = false;
       return;
     }
 
     if (fresh.length > 0) {
-      onCreate(fresh);
+      const created = await onCreate(fresh);
+      if (!created.ok) {
+        setNotice(created.reason);
+        setSubmitting(false);
+        submitLock.current = false;
+        return;
+      }
     }
 
     if (duplicateCount > 0) {
@@ -384,9 +408,11 @@ export function CreateShiftForm({
         `Added ${fresh.length}. ${duplicateCount} already existed and ${duplicateCount === 1 ? "was" : "were"} skipped.`,
       );
       setSubmitting(false);
+      submitLock.current = false;
       return;
     }
 
+    submitLock.current = false;
     handleClose();
   }
 
@@ -583,7 +609,7 @@ export function CreateShiftForm({
 
         {notice ? (
           <p
-            role="status"
+            role="alert"
             className="rounded-md border border-amber-900/80 bg-amber-950/50 px-3 py-2 text-xs leading-relaxed text-amber-200"
           >
             {notice}

@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useAuth } from "@/components/auth/auth-provider";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -71,7 +71,9 @@ export function CompanySetupForm() {
     shifts: [draftFromIndex(0), draftFromIndex(1)],
   }));
   const [errors, setErrors] = useState<FieldErrors>({} as FieldErrors);
+  const [formError, setFormError] = useState<string | null>(null);
   const [touched, setTouched] = useState<Record<string, boolean>>({});
+  const submitLock = useRef(false);
   const managerName = form.managerName || user?.displayName || "";
   const email = form.email || user?.email || "";
 
@@ -113,7 +115,7 @@ export function CompanySetupForm() {
       next[`shift-${shiftIndex}-endTime`] = times.endTime;
       next[`shift-${shiftIndex}-slots`] = validateCount(
         shift.slots,
-        "Workers needed",
+        "People needed",
         1,
         50,
       );
@@ -141,15 +143,17 @@ export function CompanySetupForm() {
   }
 
   async function handleSubmit() {
+    if (submitLock.current) return;
     const nextErrors = validateStep(2);
     setErrors(nextErrors);
+    setFormError(null);
     if (hasFieldErrors(nextErrors)) return;
 
     const ownerId = ownerIdFromAuth({ uid: user?.uid, configured });
     if (!ownerId) return;
 
+    submitLock.current = true;
     setSubmitting(true);
-    setRole("ADMIN");
     try {
       await persistNewCompanyWorkspace(
         ownerId,
@@ -168,12 +172,12 @@ export function CompanySetupForm() {
         },
         user?.email,
       );
+      setRole("ADMIN");
       router.replace("/admin");
     } catch {
-      setErrors({
-        companyName: "Could not save the company. Check Firestore is enabled, then try again.",
-      });
+      setFormError("Could not save the company. Check your connection and try again.");
       setSubmitting(false);
+      submitLock.current = false;
     }
   }
 
@@ -187,7 +191,7 @@ export function CompanySetupForm() {
           Set up your company
         </h1>
         <p className="mt-2 text-sm leading-relaxed text-zinc-400">
-          A few details so Zoreva matches how your factory or warehouse already works.
+          A few details so Zoreva matches how your business already works.
         </p>
       </div>
 
@@ -224,7 +228,7 @@ export function CompanySetupForm() {
               label="Company name"
               name="companyName"
               value={form.companyName}
-              placeholder="e.g. North Yard Packing"
+              placeholder="e.g. Oak Street Bakery"
               error={touched.companyName ? errors.companyName : undefined}
               onChange={(event) => setField("companyName", event.target.value)}
             />
@@ -340,7 +344,7 @@ export function CompanySetupForm() {
                     />
                   </div>
                   <Input
-                    label="Workers needed"
+                    label="People needed"
                     name={`shift-${index}-slots`}
                     type="number"
                     min={1}
@@ -357,6 +361,12 @@ export function CompanySetupForm() {
               </fieldset>
             ))}
           </div>
+        ) : null}
+
+        {formError ? (
+          <p role="alert" className="text-sm text-red-400">
+            {formError}
+          </p>
         ) : null}
 
         <div className="flex gap-2 pt-2">
