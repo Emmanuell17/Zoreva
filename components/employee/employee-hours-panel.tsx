@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { EmployeeHoursForm } from "@/components/employee/employee-hours-form";
+import { ScheduleSaveBanner } from "@/components/schedule/schedule-save-banner";
 import { PageHeader } from "@/components/layout/page-header";
 import { ShiftCard } from "@/components/shifts/shift-card";
 import { ShiftCardList } from "@/components/shifts/shift-card-list";
@@ -11,6 +12,7 @@ import { useCurrentEmployeeId } from "@/hooks/use-current-employee";
 import { useInitialLoading } from "@/hooks/use-initial-loading";
 import { useSchedule } from "@/hooks/use-schedule";
 import { isPublishedShift } from "@/lib/rota/week";
+import { flushScheduleSave } from "@/lib/company/store";
 import { submitHours } from "@/lib/services/schedule";
 import {
   formatHourCount,
@@ -26,6 +28,8 @@ export function EmployeeHoursPanel() {
   const employeeId = useCurrentEmployeeId();
   const { shifts, signups, hours } = useSchedule();
   const [target, setTarget] = useState<Shift | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const savingHours = useRef(false);
 
   const past = signups
     .filter((signup) => signup.employeeId === employeeId)
@@ -53,6 +57,15 @@ export function EmployeeHoursPanel() {
         title="Hours"
         description="Enter the hours you worked after a shift ends."
       />
+      <ScheduleSaveBanner />
+      {notice ? (
+        <p
+          role="status"
+          className="mb-4 rounded-md border border-amber-900/80 bg-amber-950/50 px-3 py-2 text-sm text-amber-200"
+        >
+          {notice}
+        </p>
+      ) : null}
 
       <div className="grid gap-8">
         <section>
@@ -79,13 +92,26 @@ export function EmployeeHoursPanel() {
                     <Button
                       size="lg"
                       className="w-full sm:w-auto"
-                      onClick={() =>
-                        submitHours({
+                      onClick={() => {
+                        if (savingHours.current) return;
+                        const result = submitHours({
                           shiftId: shift.id,
                           startTime: shift.startTime,
                           endTime: shift.endTime,
-                        })
-                      }
+                        });
+                        if (!result.ok) {
+                          setNotice(result.reason);
+                          return;
+                        }
+                        savingHours.current = true;
+                        void flushScheduleSave()
+                          .then((saved) => {
+                            setNotice(saved.ok ? null : saved.reason);
+                          })
+                          .finally(() => {
+                            savingHours.current = false;
+                          });
+                      }}
                     >
                       Hours were as scheduled
                     </Button>

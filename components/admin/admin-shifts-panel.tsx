@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button";
 import { CopyButton } from "@/components/ui/copy-button";
 import { LoadingState } from "@/components/ui/loading-state";
 import { Modal } from "@/components/ui/modal";
+import { ScheduleSaveBanner } from "@/components/schedule/schedule-save-banner";
+import { flushScheduleSave } from "@/lib/company/store";
 import { useCompany } from "@/hooks/use-company";
 import { useInitialLoading } from "@/hooks/use-initial-loading";
 import { useSchedule } from "@/hooks/use-schedule";
@@ -54,6 +56,7 @@ export function AdminShiftsPanel() {
   const [assigning, setAssigning] = useState<Shift | null>(null);
   const [confirming, setConfirming] = useState<ConfirmAction | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [confirmingBusy, setConfirmingBusy] = useState(false);
   const [assignError, setAssignError] = useState<string | null>(null);
   const [assignWarning, setAssignWarning] = useState<{
     employeeId: string;
@@ -91,28 +94,44 @@ export function AdminShiftsPanel() {
   }
 
   async function runConfirm() {
-    if (!confirming) return;
-    if (confirming.kind === "remove") {
-      const result = removeShift(confirming.shift.id);
-      setNotice(result.ok ? "Shift removed." : result.reason);
+    if (!confirming || confirmingBusy) return;
+    const action = confirming;
+    setConfirmingBusy(true);
+    try {
+      if (action.kind === "remove") {
+        const result = removeShift(action.shift.id);
+        if (!result.ok) {
+          setNotice(result.reason);
+          return;
+        }
+        const saved = await flushScheduleSave();
+        setNotice(saved.ok ? "Shift removed." : saved.reason);
+      }
+      if (action.kind === "copy") {
+        const result = copyPreviousWeek(weekStart);
+        if (!result.ok) {
+          setNotice(result.reason);
+          return;
+        }
+        const saved = await flushScheduleSave();
+        setNotice(
+          saved.ok
+            ? `Copied ${result.created} ${result.created === 1 ? "shift" : "shifts"} as a draft.`
+            : saved.reason,
+        );
+      }
+      if (action.kind === "publish") {
+        const result = await publishWeek(weekStart);
+        setNotice(
+          result.ok
+            ? `Published ${result.published} ${result.published === 1 ? "shift" : "shifts"}. Your team can see them now.`
+            : result.reason,
+        );
+      }
+    } finally {
+      setConfirmingBusy(false);
+      setConfirming(null);
     }
-    if (confirming.kind === "copy") {
-      const result = copyPreviousWeek(weekStart);
-      setNotice(
-        result.ok
-          ? `Copied ${result.created} ${result.created === 1 ? "shift" : "shifts"} as a draft.`
-          : result.reason,
-      );
-    }
-    if (confirming.kind === "publish") {
-      const result = await publishWeek(weekStart);
-      setNotice(
-        result.ok
-          ? `Published ${result.published} ${result.published === 1 ? "shift" : "shifts"}. Your team can see them now.`
-          : result.reason,
-      );
-    }
-    setConfirming(null);
   }
 
   return (
@@ -188,6 +207,8 @@ export function AdminShiftsPanel() {
           </Button>
         </div>
       </div>
+
+      <ScheduleSaveBanner />
 
       {notice ? (
         <p
@@ -500,7 +521,8 @@ export function AdminShiftsPanel() {
           <Button
             size="sm"
             variant={confirming?.kind === "remove" ? "danger" : "primary"}
-            onClick={runConfirm}
+            loading={confirmingBusy}
+            onClick={() => void runConfirm()}
           >
             {confirming?.kind === "publish"
               ? "Publish"

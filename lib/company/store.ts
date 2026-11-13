@@ -40,6 +40,14 @@ import {
 import { normalizeJoinCode } from "@/lib/company/join-code";
 import { canUseFirestore } from "@/lib/firebase/firestore";
 import { redactCompanyForMember } from "@/lib/security/policy";
+import {
+  keepLocalSchedule,
+  noteLocalEdit,
+  noteRemoteFailed,
+  noteRemoteSucceeded,
+  scheduleSignature,
+  type ScheduleSync,
+} from "@/lib/company/schedule-sync";
 import { prunePassedSchedule } from "@/lib/shift-utils";
 import { buildCompanyWorkspace } from "@/lib/company/build-workspace";
 import type {
@@ -85,9 +93,125 @@ function setSession(next: SessionAccess | null) {
 }
 
 const listeners = new Set<() => void>();
+const SAVE_FAILED = "Could not save the rota. Your changes are still on this device.";
+
+type ScheduleSaveResult = { ok: true } | { ok: false; reason: string };
+type ScheduleSaveSnapshot = { phase: ScheduleSync["phase"]; message: string | null };
+
+let syncState: ScheduleSync = { localRevision: 0, syncedRevision: 0, phase: "idle" };
+let saveSnapshot: ScheduleSaveSnapshot = { phase: "idle", message: null };
+const saveListeners = new Set<() => void>();
+let writeQueue: Promise<void> = Promise.resolve();
+let activeWrite: Promise<ScheduleSaveResult> = Promise.resolve({ ok: true });
+let ackedActivity: { signups: ShiftSignup[]; hours: HoursEntry[] } | null = null;
+let expectedSignature: string | null = null;
 
 function notify() {
   listeners.forEach((listener) => listener());
+}
+
+function publishSave(phase: ScheduleSync["phase"]) {
+  const message = phase === "failed" ? SAVE_FAILED : null;
+  if (saveSnapshot.phase === phase && saveSnapshot.message === message) return;
+  saveSnapshot = { phase, message };
+  saveListeners.forEach((listener) => listener());
+}
+
+function applySync(next: ScheduleSync) {
+  syncState = next;
+  publishSave(next.phase);
+}
+
+function rememberAcked(company: Company) {
+  ackedActivity = {
+    signups: company.signups.map((signup) => ({ ...signup })),
+    hours: company.hours.map((entry) => ({ ...entry })),
+  };
+}
+
+function snapshotCompany(company: Company): Company {
+  return {
+    ...company,
+    shifts: company.shifts.map((shift) => ({ ...shift })),
+    signups: company.signups.map((signup) => ({ ...signup })),
+    hours: company.hours.map((entry) => ({ ...entry })),
+  };
+}
+
+function queueScheduleWrite(company: Company, revision: number): Promise<ScheduleSaveResult> {
+  const payload = snapshotCompany(company);
+  const previous = ackedActivity ?? { signups: [], hours: [] };
+  const result = writeQueue.then(async (): Promise<ScheduleSaveResult> => {
+    if (revision !== syncState.localRevision) return { ok: true };
+    try {
+      if (session?.role === "ADMIN" && session.companyId === payload.id) {
+        await updatePublishedScheduleRemote(payload);
+      } else if (session?.role === "EMPLOYEE" && session.companyId === payload.id) {
+        await syncEmployeeActivityRemote(
+          session.companyId,
+          session.employeeId,
+          previous,
+          payload,
+        );
+      } else {
+        if (revision === syncState.localRevision) applySync(noteRemoteFailed(syncState, revision));
+        return { ok: false, reason: SAVE_FAILED };
+      }
+      if (revision !== syncState.localRevision) return { ok: true };
+      rememberAcked(payload);
+      expectedSignature = scheduleSignature(payload);
+      applySync(noteRemoteSucceeded(syncState, revision));
+      return { ok: true };
+    } catch {
+      if (revision !== syncState.localRevision) return { ok: true };
+      applySync(noteRemoteFailed(syncState, revision));
+      return { ok: false, reason: SAVE_FAILED };
+    }
+  });
+  writeQueue = result.then(
+    () => undefined,
+    () => undefined,
+  );
+  activeWrite = result;
+  return result;
+}
+
+function beginScheduleWrite(company: Company): Promise<ScheduleSaveResult> {
+  if (!session || session.companyId !== company.id || !canUseFirestore()) {
+    rememberAcked(company);
+    syncState = { ...syncState, syncedRevision: syncState.localRevision, phase: "idle" };
+    publishSave("idle");
+    activeWrite = Promise.resolve({ ok: true });
+    return activeWrite;
+  }
+  expectedSignature = null;
+  applySync(noteLocalEdit(syncState));
+  return queueScheduleWrite(company, syncState.localRevision);
+}
+
+export function subscribeScheduleSave(listener: () => void) {
+  saveListeners.add(listener);
+  return () => {
+    saveListeners.delete(listener);
+  };
+}
+
+export function getScheduleSaveStatus(): ScheduleSaveSnapshot {
+  return saveSnapshot;
+}
+
+export function flushScheduleSave(): Promise<ScheduleSaveResult> {
+  if (syncState.phase === "failed" && activeCompany) return retryScheduleSave();
+  return activeWrite;
+}
+
+export function retryScheduleSave(): Promise<ScheduleSaveResult> {
+  if (!activeCompany) return Promise.resolve({ ok: true });
+  if (syncState.phase !== "failed" && syncState.localRevision === syncState.syncedRevision) {
+    return Promise.resolve({ ok: true });
+  }
+  if (syncState.phase !== "saving") applySync({ ...syncState, phase: "saving" });
+  return queueScheduleWrite(activeCompany, syncState.localRevision);
 }
 
 function demoSchedule(): ScheduleState {
@@ -137,8 +261,23 @@ function acceptRemoteCompany(company: Company) {
         })
       : company;
   if (!view) return;
-  saveCompanyLocal(view);
-  applyCompany(view, { persist: false, employeeId: session.employeeId });
+  const remoteSignature = scheduleSignature(view);
+  const merged = keepLocalSchedule(
+    activeCompany,
+    view,
+    syncState,
+    expectedSignature,
+    remoteSignature,
+  );
+  if (
+    syncState.localRevision === syncState.syncedRevision &&
+    (expectedSignature === null || expectedSignature === remoteSignature)
+  ) {
+    expectedSignature = null;
+    rememberAcked(merged);
+  }
+  saveCompanyLocal(merged);
+  applyCompany(merged, { persist: false, employeeId: session.employeeId });
 }
 
 function startWatch(companyId: string) {
@@ -245,24 +384,13 @@ export function registerScheduleBridge(bridge: ScheduleBridge) {
 export function persistActiveSchedule(state: ScheduleState) {
   if (applyingSchedule || !activeCompany) return;
 
-  const previous = activeCompany;
   activeCompany = saveCompanyLocal({
     ...activeCompany,
     shifts: state.shifts.map((shift) => ({ ...shift })),
     signups: state.signups.map((signup) => ({ ...signup })),
     hours: state.hours.map((entry) => ({ ...entry })),
   });
-  if (!session || session.companyId !== activeCompany.id || !canUseFirestore()) return;
-  if (session.role === "ADMIN") {
-    void updatePublishedScheduleRemote(activeCompany).catch(() => undefined);
-    return;
-  }
-  void syncEmployeeActivityRemote(
-    session.companyId,
-    session.employeeId,
-    previous,
-    activeCompany,
-  ).catch(() => undefined);
+  void beginScheduleWrite(activeCompany);
 }
 
 function applyCompany(
@@ -292,7 +420,7 @@ function applyCompany(
   if (next && (pruned || options?.persist !== false)) {
     activeCompany = saveCompanyLocal(next);
     if (session?.role === "ADMIN" && session.companyId === next.id && canUseFirestore()) {
-      void updatePublishedScheduleRemote(activeCompany).catch(() => undefined);
+      void beginScheduleWrite(activeCompany);
     }
   }
 
@@ -350,6 +478,7 @@ export function activateDemoWorkspace() {
 }
 
 function activateCompany(company: Company, employeeId?: string) {
+  rememberAcked(company);
   applyCompany(company, { persist: false, employeeId });
   startWatch(company.id);
 }
