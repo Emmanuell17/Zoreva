@@ -2,9 +2,9 @@
 
 import { useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { CreateShiftForm } from "@/components/admin/create-shift-form";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { CopyButton } from "@/components/ui/copy-button";
+import { EmptyState } from "@/components/ui/empty-state";
 import { LoadingState } from "@/components/ui/loading-state";
 import { Modal } from "@/components/ui/modal";
 import { useCompany } from "@/hooks/use-company";
@@ -42,6 +42,22 @@ type ConfirmAction =
   | { kind: "remove"; shift: Shift }
   | { kind: "copy" }
   | { kind: "publish" };
+
+function dayColumnLabel(day: string): string {
+  const [year, month, date] = day.split("-").map(Number);
+  return new Date(year || 1970, (month || 1) - 1, date || 1).toLocaleDateString("en-US", {
+    weekday: "short",
+    day: "numeric",
+  });
+}
+
+function weekStatusLine(shiftCount: number, open: number, draftCount: number): string {
+  const shifts = `${shiftCount} ${shiftCount === 1 ? "shift" : "shifts"}`;
+  const openText = open === 0 ? "all covered" : `${open} open`;
+  if (draftCount === 0) return `${shifts} · ${openText}`;
+  const drafts = `${draftCount} ${draftCount === 1 ? "draft" : "drafts"}`;
+  return `${shifts} · ${openText} · ${drafts}`;
+}
 
 export function AdminShiftsPanel() {
   const loading = useInitialLoading();
@@ -133,27 +149,30 @@ export function AdminShiftsPanel() {
     }
   }
 
+  const statusLine =
+    weekShifts.length > 0
+      ? weekStatusLine(weekShifts.length, coverage.open, draftCount)
+      : "";
+
   return (
     <div>
-      <div className="mb-6 flex flex-col gap-3 sm:mb-8 sm:flex-row sm:items-end sm:justify-between">
+      <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div className="min-w-0">
           <h2 className="text-xl font-medium tracking-tight text-foreground">
-            {company?.companyName ?? "Weekly rota"}
+            {company?.companyName ?? "Shifts"}
           </h2>
           <p className="mt-1 text-sm text-zinc-400">
             Plan the week, then publish it for your team.
           </p>
           {joinCode ? (
-            <p className="mt-2 flex flex-wrap items-center gap-2 text-sm text-zinc-500">
+            <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-zinc-500">
               Team code{" "}
-              <span className="font-mono tracking-[0.14em] text-foreground">
-                {joinCode}
-              </span>
+              <span className="font-mono tracking-[0.14em] text-foreground">{joinCode}</span>
               <CopyButton text={joinCode} label="Copy" variant="ghost" />
               {inviteLink ? (
                 <CopyButton
                   text={inviteLink}
-                  label="Copy invite link"
+                  label="Invite link"
                   copiedLabel="Link copied"
                   variant="ghost"
                 />
@@ -166,16 +185,26 @@ export function AdminShiftsPanel() {
         </Button>
       </div>
 
-      <div className="mb-4 flex flex-col gap-3">
+      <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex flex-wrap items-center gap-2">
-          <Button size="sm" variant="secondary" onClick={() => setWeekStart(previousWeekKey(weekStart))}>
-            Previous week
+          <Button
+            size="sm"
+            variant="secondary"
+            aria-label="Previous week"
+            onClick={() => setWeekStart(previousWeekKey(weekStart))}
+          >
+            Prev
           </Button>
-          <p className="min-w-28 text-center text-sm font-medium text-foreground">
+          <p className="min-w-24 text-center text-sm font-medium text-foreground">
             {formatWeekRange(weekStart)}
           </p>
-          <Button size="sm" variant="secondary" onClick={() => setWeekStart(nextWeekKey(weekStart))}>
-            Next week
+          <Button
+            size="sm"
+            variant="secondary"
+            aria-label="Next week"
+            onClick={() => setWeekStart(nextWeekKey(weekStart))}
+          >
+            Next
           </Button>
           {weekStart !== thisWeek ? (
             <Button size="sm" variant="ghost" onClick={() => setWeekStart(thisWeek)}>
@@ -183,27 +212,16 @@ export function AdminShiftsPanel() {
             </Button>
           ) : null}
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Badge variant="confirmed">{coverage.filled} filled</Badge>
-          <Badge variant={coverage.open > 0 ? "warning" : "default"}>{coverage.open} open</Badge>
-          <Badge variant={coverage.unassigned > 0 ? "pending" : "default"}>
-            {coverage.unassigned} with nobody
-          </Badge>
-          <Badge variant={draftCount > 0 ? "pending" : "success"}>
-            {draftCount > 0 ? `${draftCount} draft` : "Published"}
-          </Badge>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Button size="sm" variant="secondary" onClick={() => setConfirming({ kind: "copy" })}>
+        <div className="flex flex-wrap items-center gap-2">
+          {statusLine ? <p className="text-sm text-zinc-500">{statusLine}</p> : null}
+          <Button size="sm" variant="ghost" onClick={() => setConfirming({ kind: "copy" })}>
             Copy last week
           </Button>
-          <Button
-            size="sm"
-            disabled={draftCount === 0}
-            onClick={() => setConfirming({ kind: "publish" })}
-          >
-            Publish week
-          </Button>
+          {draftCount > 0 ? (
+            <Button size="sm" onClick={() => setConfirming({ kind: "publish" })}>
+              Publish
+            </Button>
+          ) : null}
         </div>
       </div>
 
@@ -225,124 +243,122 @@ export function AdminShiftsPanel() {
       ) : (
         <>
           {weekShifts.length === 0 ? (
-            <div className="mb-4 rounded-md border border-border bg-surface px-4 py-6">
-              <p className="text-sm font-medium text-foreground">Nothing on this week yet</p>
-              <p className="mt-1 text-sm text-zinc-400">
-                Add a shift, or copy last week. Copies stay a draft until you publish them.
-              </p>
-              <div className="mt-3 flex flex-wrap gap-2">
-                <Button size="sm" onClick={() => openCreate(weekStart)}>
-                  Add shift
-                </Button>
-                <Button size="sm" variant="secondary" onClick={() => setConfirming({ kind: "copy" })}>
-                  Copy last week
-                </Button>
-              </div>
+            <div className="rounded-md border border-border bg-surface">
+              <EmptyState
+                title="Nothing on this week yet"
+                description="Add a shift, or copy last week. Copies stay a draft until you publish them."
+              />
             </div>
-          ) : null}
+          ) : (
+            <>
+              <div className="mb-3 flex gap-2 overflow-x-auto md:hidden">
+                {days.map((day) => (
+                  <a
+                    key={day}
+                    href={`#rota-${day}`}
+                    className="shrink-0 rounded-full border border-border px-3 py-1 text-xs text-zinc-300"
+                  >
+                    {dayColumnLabel(day)}
+                  </a>
+                ))}
+              </div>
 
-          <div className="mb-3 flex gap-2 overflow-x-auto md:hidden">
-            {days.map((day) => (
-              <a
-                key={day}
-                href={`#rota-${day}`}
-                className="shrink-0 rounded-full border border-border px-3 py-1 text-xs text-zinc-300"
-              >
-                {formatShiftDay(day).split(",")[0]}
-              </a>
-            ))}
-          </div>
-
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-7">
-            {days.map((day) => {
-              const items = weekShifts.filter((shift) => calendarDayKey(shift.date) === day);
-              return (
-                <section
-                  key={day}
-                  id={`rota-${day}`}
-                  className="rounded-md border border-border bg-surface p-3"
-                >
-                  <div className="mb-2 flex items-center justify-between gap-2">
-                    <h3 className="text-xs font-medium text-zinc-300">{formatShiftDay(day)}</h3>
-                    <button
-                      type="button"
-                      className="text-xs text-zinc-500 hover:text-foreground"
-                      onClick={() => openCreate(day)}
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-7">
+                {days.map((day) => {
+                  const items = weekShifts.filter((shift) => calendarDayKey(shift.date) === day);
+                  return (
+                    <section
+                      key={day}
+                      id={`rota-${day}`}
+                      className="rounded-md border border-border bg-surface p-3"
                     >
-                      Add
-                    </button>
-                  </div>
-                  {items.length === 0 ? (
-                    <p className="text-xs text-zinc-600">No shifts</p>
-                  ) : (
-                    <div className="grid gap-2">
-                      {items.map((shift) => {
-                        const shiftCoverage = coverageForShift(shift, signups);
-                        const names = peopleOnShift(shift, signups).map((id) => getEmployeeName(id));
-                        const finished = isPastShift(shift);
-                        return (
-                          <article key={shift.id} className="rounded-md border border-border px-2.5 py-2">
-                            <p className="text-sm font-medium text-foreground">
-                              {shift.label ?? formatTimeRange(shift.startTime, shift.endTime)}
-                            </p>
-                            <p className="text-xs text-zinc-400">
-                              {formatTimeRange(shift.startTime, shift.endTime)}
-                            </p>
-                            {shift.positions?.length ? (
-                              <p className="mt-1 text-xs text-zinc-500">{shift.positions.join(", ")}</p>
-                            ) : null}
-                            <div className="mt-2 flex flex-wrap gap-1">
-                              <Badge variant={shift.status === "draft" ? "pending" : "success"}>
-                                {shift.status === "draft" ? "Draft" : "Published"}
-                              </Badge>
-                              <Badge variant={shiftCoverage.unassigned ? "warning" : "default"}>
-                                {shiftCoverage.filled} of {shiftCoverage.headcount}
-                              </Badge>
-                            </div>
-                            <p className="mt-2 text-xs text-zinc-400">
-                              {names.length === 0 ? "Nobody yet" : names.join(", ")}
-                            </p>
-                            {finished ? null : (
-                              <div className="mt-2 flex flex-wrap gap-1">
-                                <Button
-                                  size="sm"
-                                  variant="secondary"
-                                  onClick={() => {
-                                    setCreateOpen(false);
-                                    setAssigning(null);
-                                    setEditingShift(shift);
-                                  }}
-                                >
-                                  Edit
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  onClick={() => {
-                                    setAssignError(null);
-                                    setAssigning(shift);
-                                  }}
-                                >
-                                  Assign
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  onClick={() => setConfirming({ kind: "remove", shift })}
-                                >
-                                  Cancel
-                                </Button>
-                              </div>
-                            )}
-                          </article>
-                        );
-                      })}
-                    </div>
-                  )}
-                </section>
-              );
-            })}
-          </div>
+                      <div className="mb-2 flex items-center justify-between gap-2">
+                        <h3 className="text-xs font-medium text-zinc-300">{dayColumnLabel(day)}</h3>
+                        <button
+                          type="button"
+                          className="text-xs text-zinc-500 hover:text-foreground"
+                          onClick={() => openCreate(day)}
+                        >
+                          Add
+                        </button>
+                      </div>
+                      {items.length === 0 ? (
+                        <p className="text-xs text-zinc-600">No shifts</p>
+                      ) : (
+                        <div className="grid gap-2">
+                          {items.map((shift) => {
+                            const shiftCoverage = coverageForShift(shift, signups);
+                            const names = peopleOnShift(shift, signups).map((id) =>
+                              getEmployeeName(id),
+                            );
+                            const finished = isPastShift(shift);
+                            const detail = [
+                              shift.status === "draft" ? "Draft" : null,
+                              `${shiftCoverage.filled} of ${shiftCoverage.headcount}`,
+                              names.length === 0 ? "Nobody yet" : names.join(", "),
+                            ]
+                              .filter(Boolean)
+                              .join(" · ");
+                            return (
+                              <article
+                                key={shift.id}
+                                className="rounded-md border border-border px-2.5 py-2"
+                              >
+                                <p className="text-sm font-medium text-foreground">
+                                  {formatTimeRange(shift.startTime, shift.endTime)}
+                                </p>
+                                {shift.label ? (
+                                  <p className="text-xs text-zinc-400">{shift.label}</p>
+                                ) : null}
+                                {shift.positions?.length ? (
+                                  <p className="mt-1 text-xs text-zinc-500">
+                                    {shift.positions.join(", ")}
+                                  </p>
+                                ) : null}
+                                <p className="mt-1.5 text-xs text-zinc-400">{detail}</p>
+                                {finished ? null : (
+                                  <div className="mt-2 flex flex-wrap gap-x-2.5 gap-y-1 text-xs">
+                                    <button
+                                      type="button"
+                                      className="text-zinc-400 hover:text-foreground"
+                                      onClick={() => {
+                                        setCreateOpen(false);
+                                        setAssigning(null);
+                                        setEditingShift(shift);
+                                      }}
+                                    >
+                                      Edit
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="text-zinc-400 hover:text-foreground"
+                                      onClick={() => {
+                                        setAssignError(null);
+                                        setAssigning(shift);
+                                      }}
+                                    >
+                                      Assign
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="text-zinc-500 hover:text-foreground"
+                                      onClick={() => setConfirming({ kind: "remove", shift })}
+                                    >
+                                      Cancel
+                                    </button>
+                                  </div>
+                                )}
+                              </article>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </section>
+                  );
+                })}
+              </div>
+            </>
+          )}
         </>
       )}
 
