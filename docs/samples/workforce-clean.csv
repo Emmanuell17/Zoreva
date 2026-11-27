@@ -1,0 +1,6 @@
+employee_id,name,email,role,date,start,end,slots
+emp_1,Alex Rivera,alex@example.com,picker,2026-10-20,06:00,14:00,3
+emp_2,Sam Chen,sam@example.com,packer,2026-10-20,06:00,14:00,3
+emp_3,Jordan Blake,jordan@example.com,picker,2026-10-20,14:00,22:00,2
+emp_4,Riley Patel,riley@example.com,lead,2026-10-21,08:00,16:00,1
+emp_5,Chris Ng,chris@example.com,packer,2026-10-21,08:00,16:00,2

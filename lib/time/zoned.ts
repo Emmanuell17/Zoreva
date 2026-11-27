@@ -107,6 +107,16 @@ export function zonedWallTimeToUtc(date: string, time: string, timeZone: string)
   return wantedUtc > shownUtc ? adjusted : utc;
 }
 
+export function calendarDayInZone(
+  utcMillis: number,
+  timeZone: string = DEFAULT_BUSINESS_TIMEZONE,
+): string | null {
+  if (!isValidTimeZone(timeZone)) return null;
+  const shown = wallParts(utcMillis, timeZone);
+  if (!shown) return null;
+  return shown.slice(0, 10);
+}
+
 export function shiftEndUtc(
   date: string,
   startTime: string,

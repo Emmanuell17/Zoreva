@@ -10,6 +10,7 @@ import {
   getActiveCompany,
   getBookingSession,
   getCurrentEmployeeId,
+  flushScheduleSave,
   persistActiveSchedule,
   registerScheduleBridge,
 } from "@/lib/company/store";
@@ -103,15 +104,27 @@ function enqueue<T>(task: () => Promise<T>): Promise<T> {
   return run;
 }
 
+function restoreSnapshot(previous: ScheduleSnapshot) {
+  shifts = previous.shifts.map((shift) => ({ ...shift }));
+  signups = previous.signups.map((signup) => ({ ...signup }));
+  hours = previous.hours.map((entry) => ({ ...entry }));
+  snapshot = buildSnapshot();
+  listeners.forEach((listener) => listener());
+}
+
 async function commitMutation(): Promise<{ ok: true } | { ok: false; reason: string }> {
   const previous = snapshot;
   try {
     await persistActiveSchedule(buildSnapshot());
+    const saved = await flushScheduleSave();
+    if (!saved.ok) {
+      restoreSnapshot(previous);
+      await persistActiveSchedule(buildSnapshot());
+      await flushScheduleSave();
+      return saved;
+    }
   } catch {
-    shifts = previous.shifts.map((shift) => ({ ...shift }));
-    signups = previous.signups.map((signup) => ({ ...signup }));
-    hours = previous.hours.map((entry) => ({ ...entry }));
-    snapshot = buildSnapshot();
+    restoreSnapshot(previous);
     return { ok: false, reason: SAVE_FAILED };
   }
   snapshot = buildSnapshot();
@@ -510,7 +523,14 @@ export async function publishWeek(
     const company = getActiveCompany();
     const session = getBookingSession();
     if (company && session?.role === "ADMIN" && session.companyId === company.id) {
-      await syncShiftOpeningsRemote(company.id, drafts, signups, company.timezone);
+      try {
+        await syncShiftOpeningsRemote(company.id, drafts, signups, company.timezone, { fail: true });
+      } catch {
+        return {
+          ok: false,
+          reason: "Could not publish the week. Check your connection and try again.",
+        };
+      }
       for (const shift of drafts) {
         for (const employeeId of shift.assigneeIds ?? []) {
           const saved = await assignEmployeeRemote(company.id, employeeId, shift.id);

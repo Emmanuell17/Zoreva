@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import { EmployeeHoursForm } from "@/components/employee/employee-hours-form";
+import { ScheduleSaveBanner } from "@/components/schedule/schedule-save-banner";
 import { PageHeader } from "@/components/layout/page-header";
 import { ShiftCard } from "@/components/shifts/shift-card";
 import { ShiftCardList } from "@/components/shifts/shift-card-list";
@@ -71,7 +72,7 @@ export function EmployeeHoursPanel() {
         title="Hours"
         description="Enter the hours you worked after a shift ends."
       />
-
+      <ScheduleSaveBanner />
       {error ? (
         <p role="alert" className="mb-4 rounded-md border border-red-900/80 bg-red-950/40 px-3 py-2 text-sm text-red-200">
           {error}

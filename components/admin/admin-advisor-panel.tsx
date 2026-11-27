@@ -205,7 +205,7 @@ export function AdminAdvisorPanel() {
             <p className="mt-1.5 text-sm text-zinc-500">
               {file
                 ? formatBytes(file.size)
-                : "Up to 5 MB. A sample lives in docs/samples/workforce-sample.csv."}
+                : "Up to 5 MB. Samples live in docs/samples."}
             </p>
           </div>
           <div className="mt-8 flex items-center justify-between gap-3">

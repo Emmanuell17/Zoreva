@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { LandingAccount } from "@/components/landing/landing-account";
 import { FlowPreview } from "@/components/landing/flow-preview";
 import { Badge } from "@/components/ui/badge";
 
@@ -54,20 +54,7 @@ export function LandingPage() {
 
       <header className="relative z-10 mx-auto flex w-full max-w-6xl items-center justify-between px-6 py-5 sm:px-10">
         <p className="text-sm font-medium tracking-tight">Zoreva</p>
-        <nav className="flex items-center gap-1 sm:gap-3">
-          <Link
-            href="/join"
-            className="inline-flex min-h-10 items-center px-3 text-sm text-zinc-400 transition-colors hover:text-foreground"
-          >
-            Join a team
-          </Link>
-          <Link
-            href="/login"
-            className="inline-flex min-h-10 items-center px-3 text-sm text-zinc-400 transition-colors hover:text-foreground"
-          >
-            Log in
-          </Link>
-        </nav>
+        <LandingAccount placement="nav" />
       </header>
 
       <main className="relative z-10 flex-1">
@@ -93,24 +80,7 @@ export function LandingPage() {
               and what was worked.
             </p>
 
-            <div className="mt-9 flex flex-col gap-3 sm:flex-row sm:items-center">
-              <Link
-                href="/register"
-                className="inline-flex h-11 items-center justify-center rounded-full bg-foreground px-6 text-sm font-medium text-background transition-colors hover:bg-zinc-200"
-              >
-                Get started
-              </Link>
-              <Link
-                href="/join"
-                className="inline-flex h-11 items-center justify-center rounded-full border border-zinc-700 px-6 text-sm font-medium transition-colors hover:bg-zinc-900"
-              >
-                Join with a code
-              </Link>
-            </div>
-
-            <p className="mt-5 text-xs text-zinc-500">
-              Sign in with Google. No password to remember.
-            </p>
+            <LandingAccount placement="hero" />
           </div>
 
           <div className="animate-[fade-up_0.9s_ease-out_0.15s_both]">
@@ -249,20 +219,7 @@ export function LandingPage() {
               Create a company, share the code, and let your team take it from
               there.
             </p>
-            <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-              <Link
-                href="/register"
-                className="inline-flex h-11 items-center justify-center rounded-full bg-foreground px-6 text-sm font-medium text-background transition-colors hover:bg-zinc-200"
-              >
-                Get started
-              </Link>
-              <Link
-                href="/login"
-                className="inline-flex h-11 items-center justify-center rounded-full border border-zinc-700 px-6 text-sm font-medium transition-colors hover:bg-zinc-900"
-              >
-                Log in
-              </Link>
-            </div>
+            <LandingAccount placement="footer" />
           </div>
         </section>
       </main>

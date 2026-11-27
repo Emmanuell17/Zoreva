@@ -27,7 +27,7 @@ export function MobileNav({ navItems, homeHref }: MobileNavProps) {
             : "overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
         )}
       >
-        {navItems.map((item) => {
+        {navItems.filter((item) => item.href !== "/admin/advisor").map((item) => {
           const isActive = isNavItemActive(pathname, item.href, homeHref);
 
           return (
@@ -46,6 +46,25 @@ export function MobileNav({ navItems, homeHref }: MobileNavProps) {
             </Link>
           );
         })}
+        {navItems
+          .filter((item) => item.href === "/admin/advisor")
+          .map((item) => {
+            const isActive = isNavItemActive(pathname, item.href, homeHref);
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={cn(
+                  "inline-flex min-h-10 shrink-0 items-center justify-center rounded-full border px-3 text-xs font-medium sm:text-sm",
+                  isActive
+                    ? "border-foreground bg-foreground text-background"
+                    : "border-zinc-500 bg-zinc-900 text-foreground",
+                )}
+              >
+                Operations advisor
+              </Link>
+            );
+          })}
       </div>
     </nav>
   );

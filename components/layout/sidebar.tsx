@@ -29,7 +29,7 @@ export function Sidebar({ navItems, homeHref, roleLabel }: SidebarProps) {
         </Link>
       </div>
       <nav className="flex flex-1 flex-col gap-1 p-2.5 lg:p-3" aria-label="Main">
-        {navItems.map((item) => {
+        {navItems.filter((item) => !isAdvisorItem(item)).map((item) => {
           const isActive = isNavItemActive(pathname, item.href, homeHref);
 
           return (
@@ -46,6 +46,13 @@ export function Sidebar({ navItems, homeHref, roleLabel }: SidebarProps) {
             </Link>
           );
         })}
+        {navItems.filter(isAdvisorItem).map((item) => (
+          <AdvisorLink
+            key={item.href}
+            href={item.href}
+            active={isNavItemActive(pathname, item.href, homeHref)}
+          />
+        ))}
       </nav>
       <div className="border-t border-border p-4">
         <p className="text-xs font-medium text-zinc-400">
@@ -61,5 +68,27 @@ export function Sidebar({ navItems, homeHref, roleLabel }: SidebarProps) {
         <SignOutButton className="mt-3 w-full justify-start px-0 text-zinc-500 hover:bg-transparent hover:text-foreground" />
       </div>
     </aside>
+  );
+}
+
+function isAdvisorItem(item: NavItem): boolean {
+  return item.href === "/admin/advisor";
+}
+
+function AdvisorLink({ href, active }: { href: string; active: boolean }) {
+  return (
+    <Link
+      href={href}
+      className={
+        active
+          ? "mt-3 rounded-lg border border-foreground bg-foreground px-3 py-3 text-background"
+          : "mt-3 rounded-lg border border-zinc-500 bg-zinc-900 px-3 py-3 text-foreground transition-colors hover:border-zinc-300 hover:bg-zinc-800"
+      }
+    >
+      <span className="block text-sm font-medium leading-tight">Operations advisor</span>
+      <span className={`mt-1 block text-[11px] leading-snug ${active ? "text-zinc-600" : "text-zinc-400"}`}>
+        Check a roster before anyone is booked.
+      </span>
+    </Link>
   );
 }

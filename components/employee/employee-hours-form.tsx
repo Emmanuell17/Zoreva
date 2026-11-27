@@ -58,23 +58,22 @@ function HoursFormInner({
     submitLock.current = true;
     setSubmitting(true);
     setError(null);
-
-    const result = await submitHours({
-      shiftId: shift.id,
-      startTime: nextStart,
-      endTime: nextEnd,
-      note,
-    });
-
-    if (!result.ok) {
-      setError(result.reason);
-      setSubmitting(false);
+    try {
+      const result = await submitHours({
+        shiftId: shift.id,
+        startTime: nextStart,
+        endTime: nextEnd,
+        note,
+      });
+      if (!result.ok) {
+        setError(result.reason);
+        return;
+      }
+      onClose();
+    } finally {
       submitLock.current = false;
-      return;
+      setSubmitting(false);
     }
-
-    submitLock.current = false;
-    onClose();
   }
 
   return (

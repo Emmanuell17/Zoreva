@@ -1,5 +1,5 @@
 import { clockMinutes, shiftsOverlap } from "@/lib/time/interval";
-import { DEFAULT_BUSINESS_TIMEZONE, shiftEndUtc } from "@/lib/time/zoned";
+import { calendarDayInZone, DEFAULT_BUSINESS_TIMEZONE, shiftEndUtc } from "@/lib/time/zoned";
 import type { HoursEntry, Shift, ShiftSignup } from "@/types";
 
 export function toDate(value: string | Date): Date {
@@ -65,14 +65,51 @@ export function isPastShift(
   now = new Date(),
   timeZone: string = DEFAULT_BUSINESS_TIMEZONE,
 ): boolean {
-  const instant = shiftEndUtc(
-    calendarDayKey(shift.date),
-    shift.startTime,
-    shift.endTime,
-    timeZone,
-  );
+  const instant = shiftEndInstant(shift, timeZone);
   if (instant === null) return shiftDateTime(shift, "end") <= now;
   return instant <= now.getTime();
+}
+
+function shiftEndInstant(shift: Pick<Shift, "date" | "startTime" | "endTime">, timeZone: string): number | null {
+  return shiftEndUtc(calendarDayKey(shift.date), shift.startTime, shift.endTime, timeZone);
+}
+
+/** A shift is removed only after it has finished and the company-local day of that end is over. */
+export function isShiftCleared(
+  shift: Shift,
+  now = new Date(),
+  timeZone: string = DEFAULT_BUSINESS_TIMEZONE,
+): boolean {
+  if (!isPastShift(shift, now, timeZone)) return false;
+  const instant = shiftEndInstant(shift, timeZone);
+  if (instant === null) {
+    return calendarDayKey(shiftDateTime(shift, "end")) < calendarDayKey(now);
+  }
+  const endDay = calendarDayInZone(instant, timeZone);
+  const today = calendarDayInZone(now.getTime(), timeZone);
+  if (!endDay || !today) return calendarDayKey(shiftDateTime(shift, "end")) < calendarDayKey(now);
+  return endDay < today;
+}
+
+export function prunePassedSchedule<T extends {
+  timezone?: string;
+  shifts: Shift[];
+  signups: ShiftSignup[];
+  hours: HoursEntry[];
+}>(company: T, now = new Date()): T | null {
+  const timeZone = company.timezone || DEFAULT_BUSINESS_TIMEZONE;
+  const expired = new Set(
+    company.shifts
+      .filter((shift) => isShiftCleared(shift, now, timeZone))
+      .map((shift) => shift.id),
+  );
+  if (expired.size === 0) return null;
+  return {
+    ...company,
+    shifts: company.shifts.filter((shift) => !expired.has(shift.id)),
+    signups: company.signups.filter((signup) => !expired.has(signup.shiftId)),
+    hours: company.hours.filter((entry) => !expired.has(entry.shiftId)),
+  };
 }
 
 export function hoursBetween(startTime: string, endTime: string): number {

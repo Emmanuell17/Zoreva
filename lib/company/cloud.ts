@@ -678,15 +678,15 @@ export async function migrateManagerWorkspaceRemote(
   await saveDraftRotaRemote(company);
 }
 
-async function saveDraftRotaRemote(company: Company): Promise<void> {
+async function saveDraftRotaRemote(company: Company, failOnError = false): Promise<void> {
   if (!canUseFirestore()) return;
   try {
     await setDoc(
       doc(getFirebaseFirestore(), "companies", company.id, "drafts", "rota"),
       clone(draftRotaPayload(company)),
     );
-  } catch {
-    // A missing rules deploy should not undo the published rota.
+  } catch (error) {
+    if (failOnError) throw error;
   }
 }
 
@@ -727,8 +727,9 @@ export async function updatePublishedScheduleRemote(company: Company): Promise<v
     company.shifts.filter((shift) => shift.status !== "draft"),
     company.signups,
     company.timezone,
+    { fail: true },
   );
-  await saveDraftRotaRemote(company);
+  await saveDraftRotaRemote(company, true);
 }
 
 export class JoinFailed extends Error {
@@ -993,6 +994,7 @@ export async function syncShiftOpeningsRemote(
   shifts: Shift[],
   signups: { shiftId: string }[] = [],
   timeZone: string = DEFAULT_BUSINESS_TIMEZONE,
+  options?: { fail?: boolean },
 ): Promise<void> {
   if (!canUseFirestore() || shifts.length === 0) return;
   const db = getFirebaseFirestore();
@@ -1028,8 +1030,8 @@ export async function syncShiftOpeningsRemote(
         });
       });
     }
-  } catch {
-    // A counter sync can be retried on the next schedule save. It must not undo company setup.
+  } catch (error) {
+    if (options?.fail) throw error;
   }
 }
 
