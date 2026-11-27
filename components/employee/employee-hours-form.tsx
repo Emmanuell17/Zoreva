@@ -4,7 +4,6 @@ import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
-import { flushScheduleSave } from "@/lib/company/store";
 import { submitHours } from "@/lib/services/schedule";
 import { formatDayLabel, formatTimeRange } from "@/lib/utils";
 import {
@@ -38,11 +37,16 @@ function HoursFormInner({
   const [custom, setCustom] = useState(false);
   const [errors, setErrors] = useState<FieldErrors<"startTime" | "endTime" | "note">>({});
   const [submitting, setSubmitting] = useState(false);
-  const submittingRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
+  const submitLock = useRef(false);
+
+  function requestClose() {
+    if (submitLock.current) return;
+    onClose();
+  }
 
   async function save(nextStart: string, nextEnd: string) {
-    if (submittingRef.current) return;
+    if (submitLock.current) return;
     const timeErrors = validateTimeRange(nextStart, nextEnd);
     const nextErrors = {
       ...timeErrors,
@@ -51,32 +55,23 @@ function HoursFormInner({
     setErrors(nextErrors);
     if (hasFieldErrors(nextErrors)) return;
 
-    submittingRef.current = true;
+    submitLock.current = true;
     setSubmitting(true);
     setError(null);
-
     try {
-      const result = submitHours({
+      const result = await submitHours({
         shiftId: shift.id,
         startTime: nextStart,
         endTime: nextEnd,
         note,
       });
-
       if (!result.ok) {
         setError(result.reason);
         return;
       }
-
-      const saved = await flushScheduleSave();
-      if (!saved.ok) {
-        setError(saved.reason);
-        return;
-      }
-
       onClose();
     } finally {
-      submittingRef.current = false;
+      submitLock.current = false;
       setSubmitting(false);
     }
   }
@@ -84,7 +79,7 @@ function HoursFormInner({
   return (
     <Modal
       open
-      onClose={onClose}
+      onClose={requestClose}
       title="Enter hours"
       description={`${formatDayLabel(shift.date)} · ${formatTimeRange(shift.startTime, shift.endTime)}`}
     >

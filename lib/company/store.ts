@@ -3,6 +3,7 @@ import { shiftsSeed } from "@/lib/mocks/shifts";
 import { signupsSeed } from "@/lib/mocks/signups";
 import { CURRENT_EMPLOYEE_ID, usersSeed } from "@/lib/mocks/users";
 import {
+  CompanyReadError,
   JoinFailed,
   clearClosedCompanyLinksRemote,
   companyClosedForEmployeeRemote,
@@ -87,6 +88,57 @@ type SessionAccess = {
 };
 
 let session: SessionAccess | null = null;
+let workspaceError: string | null = null;
+let watchFailed = false;
+let lastHydrate: {
+  role: Role | null;
+  uid?: string | null;
+  email?: string | null;
+  configured: boolean;
+} | null = null;
+
+function reportWorkspaceError(message: string) {
+  watchFailed = true;
+  if (workspaceError === message) return;
+  workspaceError = message;
+  notify();
+}
+
+function clearWorkspaceError() {
+  watchFailed = false;
+  if (!workspaceError) return;
+  workspaceError = null;
+  notify();
+}
+
+export function getWorkspaceError(): string | null {
+  return workspaceError;
+}
+
+export async function retryWorkspaceLoad(): Promise<void> {
+  watchFailed = false;
+  workspaceError = null;
+  notify();
+  if (lastHydrate) {
+    await hydrateWorkspace(lastHydrate);
+    return;
+  }
+  if (session) startWatch(session.companyId);
+}
+
+async function readRemote<T>(
+  work: () => Promise<T>,
+): Promise<{ ok: true; value: T } | { ok: false }> {
+  try {
+    return { ok: true, value: await work() };
+  } catch (error) {
+    if (error instanceof CompanyReadError) {
+      reportWorkspaceError(error.message);
+      return { ok: false };
+    }
+    throw error;
+  }
+}
 
 function setSession(next: SessionAccess | null) {
   session = next;
@@ -246,8 +298,9 @@ function onWorkspaceVisible() {
 }
 
 function acceptRemoteCompany(company: Company) {
-  if (applyingSchedule) return;
+  if (watchFailed || applyingSchedule) return;
   if (!activeCompany || activeCompany.id !== company.id || !session) return;
+  clearWorkspaceError();
   const view =
     session.role === "EMPLOYEE"
       ? redactCompanyForMember(company, {
@@ -285,8 +338,13 @@ function startWatch(companyId: string) {
   if (session?.companyId === companyId) {
     remoteUnsub =
       session.role === "ADMIN"
-        ? watchManagerWorkspace(companyId, acceptRemoteCompany)
-        : watchEmployeeWorkspace(companyId, session.employeeId, acceptRemoteCompany);
+        ? watchManagerWorkspace(companyId, acceptRemoteCompany, reportWorkspaceError)
+        : watchEmployeeWorkspace(
+            companyId,
+            session.employeeId,
+            acceptRemoteCompany,
+            reportWorkspaceError,
+          );
   }
   if (typeof document !== "undefined") {
     document.addEventListener("visibilitychange", onWorkspaceVisible);
@@ -381,7 +439,7 @@ export function registerScheduleBridge(bridge: ScheduleBridge) {
   scheduleBridge = bridge;
 }
 
-export function persistActiveSchedule(state: ScheduleState) {
+export async function persistActiveSchedule(state: ScheduleState): Promise<void> {
   if (applyingSchedule || !activeCompany) return;
 
   activeCompany = saveCompanyLocal({
@@ -644,36 +702,53 @@ export async function hydrateWorkspace(options: {
   });
 
   if (options.configured && options.uid && canUseFirestore()) {
-    let membership = await loadMembershipRemote(options.uid);
+    lastHydrate = options;
+    const membershipRead = await readRemote(() => loadMembershipRemote(options.uid));
+    if (!membershipRead.ok) return { role: options.role };
+    let membership = membershipRead.value;
     if (
       membership &&
       membership.userId === options.uid &&
       membership.role === "ADMIN"
     ) {
       const adminMembership = membership;
-      const loaded = await loadManagerCompanyRemote(adminMembership.companyId);
+      const loadedRead = await readRemote(() =>
+        loadManagerCompanyRemote(adminMembership.companyId),
+      );
+      if (!loadedRead.ok) return { role: "ADMIN" };
+      const loaded = loadedRead.value;
       if (!loaded && (await clearClosedCompanyLinksRemote(options.uid, options.email))) {
         forgetCompanyLocal(adminMembership.companyId);
         membership = null;
       }
       if (loaded && loaded.company.ownerId === options.uid) {
-        const published = await publishManagerCompany(loaded.company, options.uid);
+        let published: Company | null = null;
+        try {
+          published = await publishManagerCompany(loaded.company, options.uid);
+        } catch (error) {
+          if (error instanceof CompanyReadError) {
+            reportWorkspaceError(error.message);
+            return { role: "ADMIN" };
+          }
+          throw error;
+        }
         if (published) {
           if (options.email) saveOwnerEmail(options.email, published.id);
           saveMembership(adminMembership);
+          clearWorkspaceError();
           activateManager(published, options.uid);
           return { role: "ADMIN" };
         }
       }
     }
 
-    if (
-      membership &&
-      membership.userId === options.uid &&
-      membership.role === "EMPLOYEE" &&
-      (await companyClosedForEmployeeRemote(membership.companyId))
-    ) {
-      if (await clearClosedCompanyLinksRemote(options.uid, options.email)) {
+    if (membership && membership.userId === options.uid && membership.role === "EMPLOYEE") {
+      const employeeCompanyId = membership.companyId;
+      const closedRead = await readRemote(() =>
+        companyClosedForEmployeeRemote(employeeCompanyId),
+      );
+      if (!closedRead.ok) return { role: "EMPLOYEE" };
+      if (closedRead.value && (await clearClosedCompanyLinksRemote(options.uid, options.email))) {
         forgetCompanyLocal(membership.companyId);
         membership = null;
       }
@@ -684,39 +759,45 @@ export async function hydrateWorkspace(options: {
       membership.userId === options.uid &&
       membership.role === "EMPLOYEE"
     ) {
-      const remote = await loadEmployeeCompanyRemote(
-        membership.companyId,
-        membership.employeeId,
+      const employeeMembership = membership;
+      const remoteRead = await readRemote(() =>
+        loadEmployeeCompanyRemote(employeeMembership.companyId, employeeMembership.employeeId),
       );
-      const company =
-        remote ??
-        ({
-          id: membership.companyId,
-          ownerId: "",
-          joinCode: "",
-          companyName: "Your team",
-          managerName: "",
-          email: "",
-          employeeCount: 1,
-          shiftTemplates: [],
-          employees: [],
-          shifts: [],
-          signups: [],
-          hours: [],
-          setupCompletedAt: new Date().toISOString(),
-        } satisfies Company);
-      activateEmployee(company, options.uid, membership.employeeId);
+      if (!remoteRead.ok) return { role: "EMPLOYEE" };
+      if (!remoteRead.value) {
+        reportWorkspaceError("Could not load your company. Check your connection and try again.");
+        return { role: "EMPLOYEE" };
+      }
+      clearWorkspaceError();
+      activateEmployee(remoteRead.value, options.uid, employeeMembership.employeeId);
       return { role: "EMPLOYEE" };
     }
 
     if (!membership && options.role !== "EMPLOYEE") {
-      let remoteId = await loadCompanyIdForOwnerRemote(options.uid);
-      if (!remoteId) remoteId = await loadCompanyIdForEmailRemote(options.email);
+      const ownerRead = await readRemote(() => loadCompanyIdForOwnerRemote(options.uid));
+      if (!ownerRead.ok) return { role: options.role };
+      let remoteId = ownerRead.value;
+      if (!remoteId) {
+        const emailRead = await readRemote(() => loadCompanyIdForEmailRemote(options.email));
+        if (!emailRead.ok) return { role: options.role };
+        remoteId = emailRead.value;
+      }
       if (remoteId) {
-        const loaded = await loadManagerCompanyRemote(remoteId);
+        const loadedRead = await readRemote(() => loadManagerCompanyRemote(remoteId));
+        if (!loadedRead.ok) return { role: options.role };
+        const loaded = loadedRead.value;
         if (!loaded) await clearClosedCompanyLinksRemote(options.uid, options.email);
         if (loaded && loaded.company.ownerId === options.uid) {
-          const published = await publishManagerCompany(loaded.company, options.uid);
+          let published: Company | null = null;
+          try {
+            published = await publishManagerCompany(loaded.company, options.uid);
+          } catch (error) {
+            if (error instanceof CompanyReadError) {
+              reportWorkspaceError(error.message);
+              return { role: "ADMIN" };
+            }
+            throw error;
+          }
           if (published) {
             if (options.email) saveOwnerEmail(options.email, published.id);
             saveMembership({
@@ -725,6 +806,7 @@ export async function hydrateWorkspace(options: {
               employeeId: `${published.id}_${options.uid}`,
               role: "ADMIN",
             });
+            clearWorkspaceError();
             activateManager(published, options.uid);
             return { role: "ADMIN" };
           }
@@ -770,34 +852,22 @@ export async function joinCompanyWithCode(input: {
   if (canUseFirestore()) {
     try {
       const joined = await joinCompanyRemote(input);
-      const remote = await loadEmployeeCompanyRemote(joined.companyId, joined.employeeId);
-      const company: Company = remote ?? {
-        id: joined.companyId,
-        ownerId: "",
-        joinCode: "",
-        companyName: "Your team",
-        managerName: "",
-        email: "",
-        employeeCount: 1,
-        shiftTemplates: [],
-        employees: [
-          {
-            id: joined.employeeId,
-            name: input.name.trim() || "Employee",
-            email: input.email.trim(),
-            role: "EMPLOYEE",
-            companyId: joined.companyId,
-            authUid: input.userId,
-            createdAt: new Date().toISOString(),
-          },
-        ],
-        shifts: [],
-        signups: [],
-        hours: [],
-        setupCompletedAt: new Date().toISOString(),
-      };
-      activateEmployee(company, input.userId, joined.employeeId);
-      return { ok: true, company: getActiveCompany() ?? company };
+      let remote: Company | null = null;
+      try {
+        remote = await loadEmployeeCompanyRemote(joined.companyId, joined.employeeId);
+      } catch (error) {
+        if (!(error instanceof CompanyReadError)) throw error;
+        return { ok: false, reason: error.message };
+      }
+      if (!remote) {
+        return {
+          ok: false,
+          reason: "Could not load your company. Check your connection and try again.",
+        };
+      }
+      clearWorkspaceError();
+      activateEmployee(remote, input.userId, joined.employeeId);
+      return { ok: true, company: getActiveCompany() ?? remote };
     } catch (error) {
       if (error instanceof JoinFailed) return { ok: false, reason: error.message };
       return {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -48,11 +48,14 @@ export function EmployeeAvailabilityPanel() {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState<"hours" | "off" | null>(null);
   const [pendingRemove, setPendingRemove] = useState<{ id: string; label: string } | null>(null);
+  const saveLock = useRef<"hours" | "off" | "remove" | null>(null);
 
   const windows = (company?.availability ?? []).filter((window) => window.employeeId === employeeId);
   const requests = (company?.timeOff ?? []).filter((request) => request.employeeId === employeeId);
 
   async function saveHours() {
+    if (saveLock.current) return;
+    saveLock.current = "hours";
     setSaving("hours");
     setError(null);
     setNotice(null);
@@ -65,6 +68,7 @@ export function EmployeeAvailabilityPanel() {
       endTime,
       available,
     });
+    saveLock.current = null;
     setSaving(null);
     if (!result.ok) {
       setError(result.reason);
@@ -74,6 +78,8 @@ export function EmployeeAvailabilityPanel() {
   }
 
   async function saveTimeOff() {
+    if (saveLock.current) return;
+    saveLock.current = "off";
     setSaving("off");
     setError(null);
     setNotice(null);
@@ -85,6 +91,7 @@ export function EmployeeAvailabilityPanel() {
       endTime: offEndTime,
       reason: offReason,
     });
+    saveLock.current = null;
     setSaving(null);
     if (!result.ok) {
       setError(result.reason);
@@ -95,12 +102,14 @@ export function EmployeeAvailabilityPanel() {
   }
 
   async function confirmRemove() {
-    if (!pendingRemove) return;
+    if (!pendingRemove || saveLock.current) return;
+    saveLock.current = "remove";
     setError(null);
     setNotice(null);
     const result = pendingRemove.label.startsWith("Time off")
       ? await cancelTimeOff(pendingRemove.id, employeeId)
       : await removeAvailabilityWindow(pendingRemove.id, employeeId);
+    saveLock.current = null;
     setPendingRemove(null);
     if (!result.ok) {
       setError(result.reason);
@@ -281,7 +290,10 @@ export function EmployeeAvailabilityPanel() {
 
       <Modal
         open={Boolean(pendingRemove)}
-        onClose={() => setPendingRemove(null)}
+        onClose={() => {
+          if (saveLock.current === "remove") return;
+          setPendingRemove(null);
+        }}
         title="Remove this?"
         description="This only changes your availability. It does not take you off a shift you already accepted."
       >

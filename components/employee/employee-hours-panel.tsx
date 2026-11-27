@@ -12,7 +12,6 @@ import { useCurrentEmployeeId } from "@/hooks/use-current-employee";
 import { useInitialLoading } from "@/hooks/use-initial-loading";
 import { useSchedule } from "@/hooks/use-schedule";
 import { isPublishedShift } from "@/lib/rota/week";
-import { flushScheduleSave } from "@/lib/company/store";
 import { submitHours } from "@/lib/services/schedule";
 import {
   formatHourCount,
@@ -28,8 +27,24 @@ export function EmployeeHoursPanel() {
   const employeeId = useCurrentEmployeeId();
   const { shifts, signups, hours } = useSchedule();
   const [target, setTarget] = useState<Shift | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
-  const savingHours = useRef(false);
+  const [error, setError] = useState<string | null>(null);
+  const savingId = useRef<string | null>(null);
+  const [savingShiftId, setSavingShiftId] = useState<string | null>(null);
+
+  async function saveScheduled(shift: Shift) {
+    if (savingId.current) return;
+    savingId.current = shift.id;
+    setSavingShiftId(shift.id);
+    setError(null);
+    const result = await submitHours({
+      shiftId: shift.id,
+      startTime: shift.startTime,
+      endTime: shift.endTime,
+    });
+    savingId.current = null;
+    setSavingShiftId(null);
+    if (!result.ok) setError(result.reason);
+  }
 
   const past = signups
     .filter((signup) => signup.employeeId === employeeId)
@@ -58,12 +73,9 @@ export function EmployeeHoursPanel() {
         description="Enter the hours you worked after a shift ends."
       />
       <ScheduleSaveBanner />
-      {notice ? (
-        <p
-          role="status"
-          className="mb-4 rounded-md border border-amber-900/80 bg-amber-950/50 px-3 py-2 text-sm text-amber-200"
-        >
-          {notice}
+      {error ? (
+        <p role="alert" className="mb-4 rounded-md border border-red-900/80 bg-red-950/40 px-3 py-2 text-sm text-red-200">
+          {error}
         </p>
       ) : null}
 
@@ -92,32 +104,15 @@ export function EmployeeHoursPanel() {
                     <Button
                       size="lg"
                       className="w-full sm:w-auto"
-                      onClick={() => {
-                        if (savingHours.current) return;
-                        const result = submitHours({
-                          shiftId: shift.id,
-                          startTime: shift.startTime,
-                          endTime: shift.endTime,
-                        });
-                        if (!result.ok) {
-                          setNotice(result.reason);
-                          return;
-                        }
-                        savingHours.current = true;
-                        void flushScheduleSave()
-                          .then((saved) => {
-                            setNotice(saved.ok ? null : saved.reason);
-                          })
-                          .finally(() => {
-                            savingHours.current = false;
-                          });
-                      }}
+                      disabled={savingShiftId !== null}
+                      onClick={() => void saveScheduled(shift)}
                     >
                       Hours were as scheduled
                     </Button>
                     <Button
                       size="sm"
                       variant="ghost"
+                      disabled={savingShiftId !== null}
                       onClick={() => setTarget(shift)}
                     >
                       Different hours

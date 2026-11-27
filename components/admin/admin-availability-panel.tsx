@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -20,6 +20,7 @@ export function AdminAvailabilityPanel() {
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pendingId, setPendingId] = useState<string | null>(null);
+  const reviewLock = useRef(false);
   const requests = [...(company?.timeOff ?? [])].sort((a, b) => {
     if (a.status === b.status) return b.createdAt.localeCompare(a.createdAt);
     if (a.status === "pending") return -1;
@@ -29,10 +30,13 @@ export function AdminAvailabilityPanel() {
   const windows = company?.availability ?? [];
 
   async function decide(id: string, status: "approved" | "rejected") {
+    if (reviewLock.current) return;
+    reviewLock.current = true;
     setPendingId(id);
     setError(null);
     setNotice(null);
     const result = await reviewTimeOff(id, status);
+    reviewLock.current = false;
     setPendingId(null);
     if (!result.ok) {
       setError(result.reason);

@@ -1,14 +1,12 @@
 "use client";
 
-import { useMemo, useState, useSyncExternalStore } from "react";
+import { useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { CreateShiftForm } from "@/components/admin/create-shift-form";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { CopyButton } from "@/components/ui/copy-button";
+import { EmptyState } from "@/components/ui/empty-state";
 import { LoadingState } from "@/components/ui/loading-state";
 import { Modal } from "@/components/ui/modal";
-import { ScheduleSaveBanner } from "@/components/schedule/schedule-save-banner";
-import { flushScheduleSave, getScheduleSaveStatus } from "@/lib/company/store";
 import { useCompany } from "@/hooks/use-company";
 import { useInitialLoading } from "@/hooks/use-initial-loading";
 import { useSchedule } from "@/hooks/use-schedule";
@@ -45,6 +43,22 @@ type ConfirmAction =
   | { kind: "copy" }
   | { kind: "publish" };
 
+function dayColumnLabel(day: string): string {
+  const [year, month, date] = day.split("-").map(Number);
+  return new Date(year || 1970, (month || 1) - 1, date || 1).toLocaleDateString("en-US", {
+    weekday: "short",
+    day: "numeric",
+  });
+}
+
+function weekStatusLine(shiftCount: number, open: number, draftCount: number): string {
+  const shifts = `${shiftCount} ${shiftCount === 1 ? "shift" : "shifts"}`;
+  const openText = open === 0 ? "all covered" : `${open} open`;
+  if (draftCount === 0) return `${shifts} · ${openText}`;
+  const drafts = `${draftCount} ${draftCount === 1 ? "draft" : "drafts"}`;
+  return `${shifts} · ${openText} · ${drafts}`;
+}
+
 export function AdminShiftsPanel() {
   const loading = useInitialLoading();
   const company = useCompany();
@@ -55,8 +69,9 @@ export function AdminShiftsPanel() {
   const [editingShift, setEditingShift] = useState<Shift | null>(null);
   const [assigning, setAssigning] = useState<Shift | null>(null);
   const [confirming, setConfirming] = useState<ConfirmAction | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
-  const [confirmingBusy, setConfirmingBusy] = useState(false);
+  const [notice, setNotice] = useState<{ text: string; error: boolean } | null>(null);
+  const confirmLock = useRef(false);
+  const assignLock = useRef(false);
   const [assignError, setAssignError] = useState<string | null>(null);
   const [assignWarning, setAssignWarning] = useState<{
     employeeId: string;
@@ -94,67 +109,70 @@ export function AdminShiftsPanel() {
   }
 
   async function runConfirm() {
-    if (!confirming || confirmingBusy) return;
+    if (!confirming || confirmLock.current) return;
+    confirmLock.current = true;
     const action = confirming;
-    setConfirmingBusy(true);
     try {
       if (action.kind === "remove") {
-        const result = removeShift(action.shift.id);
-        if (!result.ok) {
-          setNotice(result.reason);
-          return;
-        }
-        const saved = await flushScheduleSave();
-        setNotice(saved.ok ? "Shift removed." : saved.reason);
+        const result = await removeShift(action.shift.id);
+        setNotice(
+          result.ok
+            ? { text: "Shift removed.", error: false }
+            : { text: result.reason, error: true },
+        );
       }
       if (action.kind === "copy") {
-        const result = copyPreviousWeek(weekStart);
-        if (!result.ok) {
-          setNotice(result.reason);
-          return;
-        }
-        const saved = await flushScheduleSave();
+        const result = await copyPreviousWeek(weekStart);
         setNotice(
-          saved.ok
-            ? `Copied ${result.created} ${result.created === 1 ? "shift" : "shifts"} as a draft.`
-            : saved.reason,
+          result.ok
+            ? {
+                text: `Copied ${result.created} ${result.created === 1 ? "shift" : "shifts"} as a draft.`,
+                error: false,
+              }
+            : { text: result.reason, error: true },
         );
       }
       if (action.kind === "publish") {
         const result = await publishWeek(weekStart);
         setNotice(
           result.ok
-            ? `Published ${result.published} ${result.published === 1 ? "shift" : "shifts"}. Your team can see them now.`
-            : result.reason,
+            ? {
+                text: `Published ${result.published} ${result.published === 1 ? "shift" : "shifts"}. Your team can see them now.`,
+                error: false,
+              }
+            : { text: result.reason, error: true },
         );
       }
-    } finally {
-      setConfirmingBusy(false);
       setConfirming(null);
+    } finally {
+      confirmLock.current = false;
     }
   }
 
+  const statusLine =
+    weekShifts.length > 0
+      ? weekStatusLine(weekShifts.length, coverage.open, draftCount)
+      : "";
+
   return (
     <div>
-      <div className="mb-6 flex flex-col gap-3 sm:mb-8 sm:flex-row sm:items-end sm:justify-between">
+      <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div className="min-w-0">
           <h2 className="text-xl font-medium tracking-tight text-foreground">
-            {company?.companyName ?? "Weekly rota"}
+            {company?.companyName ?? "Shifts"}
           </h2>
           <p className="mt-1 text-sm text-zinc-400">
             Plan the week, then publish it for your team.
           </p>
           {joinCode ? (
-            <p className="mt-2 flex flex-wrap items-center gap-2 text-sm text-zinc-500">
+            <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-zinc-500">
               Team code{" "}
-              <span className="font-mono tracking-[0.14em] text-foreground">
-                {joinCode}
-              </span>
+              <span className="font-mono tracking-[0.14em] text-foreground">{joinCode}</span>
               <CopyButton text={joinCode} label="Copy" variant="ghost" />
               {inviteLink ? (
                 <CopyButton
                   text={inviteLink}
-                  label="Copy invite link"
+                  label="Invite link"
                   copiedLabel="Link copied"
                   variant="ghost"
                 />
@@ -167,16 +185,26 @@ export function AdminShiftsPanel() {
         </Button>
       </div>
 
-      <div className="mb-4 flex flex-col gap-3">
+      <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex flex-wrap items-center gap-2">
-          <Button size="sm" variant="secondary" onClick={() => setWeekStart(previousWeekKey(weekStart))}>
-            Previous week
+          <Button
+            size="sm"
+            variant="secondary"
+            aria-label="Previous week"
+            onClick={() => setWeekStart(previousWeekKey(weekStart))}
+          >
+            Prev
           </Button>
-          <p className="min-w-28 text-center text-sm font-medium text-foreground">
+          <p className="min-w-24 text-center text-sm font-medium text-foreground">
             {formatWeekRange(weekStart)}
           </p>
-          <Button size="sm" variant="secondary" onClick={() => setWeekStart(nextWeekKey(weekStart))}>
-            Next week
+          <Button
+            size="sm"
+            variant="secondary"
+            aria-label="Next week"
+            onClick={() => setWeekStart(nextWeekKey(weekStart))}
+          >
+            Next
           </Button>
           {weekStart !== thisWeek ? (
             <Button size="sm" variant="ghost" onClick={() => setWeekStart(thisWeek)}>
@@ -184,38 +212,29 @@ export function AdminShiftsPanel() {
             </Button>
           ) : null}
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Badge variant="confirmed">{coverage.filled} filled</Badge>
-          <Badge variant={coverage.open > 0 ? "warning" : "default"}>{coverage.open} open</Badge>
-          <Badge variant={coverage.unassigned > 0 ? "pending" : "default"}>
-            {coverage.unassigned} with nobody
-          </Badge>
-          <Badge variant={draftCount > 0 ? "pending" : "success"}>
-            {draftCount > 0 ? `${draftCount} draft` : "Published"}
-          </Badge>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Button size="sm" variant="secondary" onClick={() => setConfirming({ kind: "copy" })}>
+        <div className="flex flex-wrap items-center gap-2">
+          {statusLine ? <p className="text-sm text-zinc-500">{statusLine}</p> : null}
+          <Button size="sm" variant="ghost" onClick={() => setConfirming({ kind: "copy" })}>
             Copy last week
           </Button>
-          <Button
-            size="sm"
-            disabled={draftCount === 0}
-            onClick={() => setConfirming({ kind: "publish" })}
-          >
-            Publish week
-          </Button>
+          {draftCount > 0 ? (
+            <Button size="sm" onClick={() => setConfirming({ kind: "publish" })}>
+              Publish
+            </Button>
+          ) : null}
         </div>
       </div>
 
-      <ScheduleSaveBanner />
-
       {notice ? (
         <p
-          role="status"
-          className="mb-4 rounded-md border border-border bg-surface px-3 py-2 text-sm text-zinc-300"
+          role={notice.error ? "alert" : "status"}
+          className={
+            notice.error
+              ? "mb-4 rounded-md border border-red-900/80 bg-red-950/40 px-3 py-2 text-sm text-red-200"
+              : "mb-4 rounded-md border border-border bg-surface px-3 py-2 text-sm text-zinc-300"
+          }
         >
-          {notice}
+          {notice.text}
         </p>
       ) : null}
 
@@ -224,124 +243,122 @@ export function AdminShiftsPanel() {
       ) : (
         <>
           {weekShifts.length === 0 ? (
-            <div className="mb-4 rounded-md border border-border bg-surface px-4 py-6">
-              <p className="text-sm font-medium text-foreground">Nothing on this week yet</p>
-              <p className="mt-1 text-sm text-zinc-400">
-                Add a shift, or copy last week. Copies stay a draft until you publish them.
-              </p>
-              <div className="mt-3 flex flex-wrap gap-2">
-                <Button size="sm" onClick={() => openCreate(weekStart)}>
-                  Add shift
-                </Button>
-                <Button size="sm" variant="secondary" onClick={() => setConfirming({ kind: "copy" })}>
-                  Copy last week
-                </Button>
-              </div>
+            <div className="rounded-md border border-border bg-surface">
+              <EmptyState
+                title="Nothing on this week yet"
+                description="Add a shift, or copy last week. Copies stay a draft until you publish them."
+              />
             </div>
-          ) : null}
+          ) : (
+            <>
+              <div className="mb-3 flex gap-2 overflow-x-auto md:hidden">
+                {days.map((day) => (
+                  <a
+                    key={day}
+                    href={`#rota-${day}`}
+                    className="shrink-0 rounded-full border border-border px-3 py-1 text-xs text-zinc-300"
+                  >
+                    {dayColumnLabel(day)}
+                  </a>
+                ))}
+              </div>
 
-          <div className="mb-3 flex gap-2 overflow-x-auto md:hidden">
-            {days.map((day) => (
-              <a
-                key={day}
-                href={`#rota-${day}`}
-                className="shrink-0 rounded-full border border-border px-3 py-1 text-xs text-zinc-300"
-              >
-                {formatShiftDay(day).split(",")[0]}
-              </a>
-            ))}
-          </div>
-
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-7">
-            {days.map((day) => {
-              const items = weekShifts.filter((shift) => calendarDayKey(shift.date) === day);
-              return (
-                <section
-                  key={day}
-                  id={`rota-${day}`}
-                  className="rounded-md border border-border bg-surface p-3"
-                >
-                  <div className="mb-2 flex items-center justify-between gap-2">
-                    <h3 className="text-xs font-medium text-zinc-300">{formatShiftDay(day)}</h3>
-                    <button
-                      type="button"
-                      className="text-xs text-zinc-500 hover:text-foreground"
-                      onClick={() => openCreate(day)}
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-7">
+                {days.map((day) => {
+                  const items = weekShifts.filter((shift) => calendarDayKey(shift.date) === day);
+                  return (
+                    <section
+                      key={day}
+                      id={`rota-${day}`}
+                      className="rounded-md border border-border bg-surface p-3"
                     >
-                      Add
-                    </button>
-                  </div>
-                  {items.length === 0 ? (
-                    <p className="text-xs text-zinc-600">No shifts</p>
-                  ) : (
-                    <div className="grid gap-2">
-                      {items.map((shift) => {
-                        const shiftCoverage = coverageForShift(shift, signups);
-                        const names = peopleOnShift(shift, signups).map((id) => getEmployeeName(id));
-                        const finished = isPastShift(shift);
-                        return (
-                          <article key={shift.id} className="rounded-md border border-border px-2.5 py-2">
-                            <p className="text-sm font-medium text-foreground">
-                              {shift.label ?? formatTimeRange(shift.startTime, shift.endTime)}
-                            </p>
-                            <p className="text-xs text-zinc-400">
-                              {formatTimeRange(shift.startTime, shift.endTime)}
-                            </p>
-                            {shift.positions?.length ? (
-                              <p className="mt-1 text-xs text-zinc-500">{shift.positions.join(", ")}</p>
-                            ) : null}
-                            <div className="mt-2 flex flex-wrap gap-1">
-                              <Badge variant={shift.status === "draft" ? "pending" : "success"}>
-                                {shift.status === "draft" ? "Draft" : "Published"}
-                              </Badge>
-                              <Badge variant={shiftCoverage.unassigned ? "warning" : "default"}>
-                                {shiftCoverage.filled} of {shiftCoverage.headcount}
-                              </Badge>
-                            </div>
-                            <p className="mt-2 text-xs text-zinc-400">
-                              {names.length === 0 ? "Nobody yet" : names.join(", ")}
-                            </p>
-                            {finished ? null : (
-                              <div className="mt-2 flex flex-wrap gap-1">
-                                <Button
-                                  size="sm"
-                                  variant="secondary"
-                                  onClick={() => {
-                                    setCreateOpen(false);
-                                    setAssigning(null);
-                                    setEditingShift(shift);
-                                  }}
-                                >
-                                  Edit
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  onClick={() => {
-                                    setAssignError(null);
-                                    setAssigning(shift);
-                                  }}
-                                >
-                                  Assign
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  onClick={() => setConfirming({ kind: "remove", shift })}
-                                >
-                                  Cancel
-                                </Button>
-                              </div>
-                            )}
-                          </article>
-                        );
-                      })}
-                    </div>
-                  )}
-                </section>
-              );
-            })}
-          </div>
+                      <div className="mb-2 flex items-center justify-between gap-2">
+                        <h3 className="text-xs font-medium text-zinc-300">{dayColumnLabel(day)}</h3>
+                        <button
+                          type="button"
+                          className="text-xs text-zinc-500 hover:text-foreground"
+                          onClick={() => openCreate(day)}
+                        >
+                          Add
+                        </button>
+                      </div>
+                      {items.length === 0 ? (
+                        <p className="text-xs text-zinc-600">No shifts</p>
+                      ) : (
+                        <div className="grid gap-2">
+                          {items.map((shift) => {
+                            const shiftCoverage = coverageForShift(shift, signups);
+                            const names = peopleOnShift(shift, signups).map((id) =>
+                              getEmployeeName(id),
+                            );
+                            const finished = isPastShift(shift);
+                            const detail = [
+                              shift.status === "draft" ? "Draft" : null,
+                              `${shiftCoverage.filled} of ${shiftCoverage.headcount}`,
+                              names.length === 0 ? "Nobody yet" : names.join(", "),
+                            ]
+                              .filter(Boolean)
+                              .join(" · ");
+                            return (
+                              <article
+                                key={shift.id}
+                                className="rounded-md border border-border px-2.5 py-2"
+                              >
+                                <p className="text-sm font-medium text-foreground">
+                                  {formatTimeRange(shift.startTime, shift.endTime)}
+                                </p>
+                                {shift.label ? (
+                                  <p className="text-xs text-zinc-400">{shift.label}</p>
+                                ) : null}
+                                {shift.positions?.length ? (
+                                  <p className="mt-1 text-xs text-zinc-500">
+                                    {shift.positions.join(", ")}
+                                  </p>
+                                ) : null}
+                                <p className="mt-1.5 text-xs text-zinc-400">{detail}</p>
+                                {finished ? null : (
+                                  <div className="mt-2 flex flex-wrap gap-x-2.5 gap-y-1 text-xs">
+                                    <button
+                                      type="button"
+                                      className="text-zinc-400 hover:text-foreground"
+                                      onClick={() => {
+                                        setCreateOpen(false);
+                                        setAssigning(null);
+                                        setEditingShift(shift);
+                                      }}
+                                    >
+                                      Edit
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="text-zinc-400 hover:text-foreground"
+                                      onClick={() => {
+                                        setAssignError(null);
+                                        setAssigning(shift);
+                                      }}
+                                    >
+                                      Assign
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="text-zinc-500 hover:text-foreground"
+                                      onClick={() => setConfirming({ kind: "remove", shift })}
+                                    >
+                                      Cancel
+                                    </button>
+                                  </div>
+                                )}
+                              </article>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </section>
+                  );
+                })}
+              </div>
+            </>
+          )}
         </>
       )}
 
@@ -355,27 +372,33 @@ export function AdminShiftsPanel() {
           setEditingShift(null);
         }}
         onCreate={async (inputs: CreateShiftInput[]) => {
-          const failedBefore = getScheduleSaveStatus().phase === "failed";
-          const created = createShifts(inputs);
-          const saved = await flushScheduleSave();
-          if (!saved.ok) return saved;
-          if (created.length === 0 && !failedBefore) {
+          const created = await createShifts(inputs);
+          if (!created.ok) {
+            setNotice({ text: created.reason, error: true });
+            return created;
+          }
+          if (created.created.length === 0) {
             return { ok: false, reason: "Those shifts are already on the rota." };
           }
-          const count = created.length;
-          setNotice(
-            count === 0
-              ? "Saved."
-              : `Saved ${count} draft ${count === 1 ? "shift" : "shifts"}. Publish the week when you are ready.`,
-          );
+          setNotice({
+            text: `Saved ${created.created.length} draft ${created.created.length === 1 ? "shift" : "shifts"}. Publish the week when you are ready.`,
+            error: false,
+          });
           return { ok: true };
         }}
-        onUpdate={(shiftId, input) => updateShift(shiftId, input)}
+        onUpdate={async (shiftId, input) => {
+          const result = await updateShift(shiftId, input);
+          if (!result.ok) setNotice({ text: result.reason, error: true });
+          return result;
+        }}
       />
 
       <Modal
         open={Boolean(assigning)}
-        onClose={() => setAssigning(null)}
+        onClose={() => {
+          if (assignLock.current) return;
+          setAssigning(null);
+        }}
         title="Assign people"
         description={
           assigning
@@ -398,51 +421,57 @@ export function AdminShiftsPanel() {
                       variant={assigned ? "secondary" : "primary"}
                       onClick={() => {
                         void (async () => {
-                        if (assigned) {
-                          const removed = await unassignEmployee(assigning.id, employee.id);
-                          if (!removed.ok) {
-                            setAssignError(removed.reason);
-                            return;
-                          }
-                          setAssignError(null);
-                          setAssignWarning(null);
-                          setAssigning((current) =>
-                            current
-                              ? {
-                                  ...current,
-                                  assigneeIds: (current.assigneeIds ?? []).filter((id) => id !== employee.id),
-                                }
-                              : current,
-                          );
-                          return;
-                        }
-                        const result = await assignEmployee(assigning.id, employee.id);
-                        if (!result.ok) {
-                          if (result.level === "warn") {
-                            setAssignError(null);
-                            setAssignWarning({
-                              employeeId: employee.id,
-                              name: employee.name,
-                              reasons: result.warnings,
-                            });
-                            return;
-                          }
-                          setAssignWarning(null);
-                          setAssignError(result.reason);
-                          return;
-                        }
-                        setAssignError(null);
-                        setAssignWarning(null);
-                        setAssigning((current) =>
-                          current
-                            ? {
-                                ...current,
-                                assigneeIds: assigned
-                                  ? (current.assigneeIds ?? []).filter((id) => id !== employee.id)
-                                  : [...(current.assigneeIds ?? []), employee.id],
+                          if (assignLock.current) return;
+                          assignLock.current = true;
+                          try {
+                            if (assigned) {
+                              const removed = await unassignEmployee(assigning.id, employee.id);
+                              if (!removed.ok) {
+                                setAssignError(removed.reason);
+                                return;
                               }
-                            : current,
-                        );
+                              setAssignError(null);
+                              setAssignWarning(null);
+                              setAssigning((current) =>
+                                current
+                                  ? {
+                                      ...current,
+                                      assigneeIds: (current.assigneeIds ?? []).filter(
+                                        (id) => id !== employee.id,
+                                      ),
+                                    }
+                                  : current,
+                              );
+                              return;
+                            }
+                            const result = await assignEmployee(assigning.id, employee.id);
+                            if (!result.ok) {
+                              if (result.level === "warn") {
+                                setAssignError(null);
+                                setAssignWarning({
+                                  employeeId: employee.id,
+                                  name: employee.name,
+                                  reasons: result.warnings,
+                                });
+                                return;
+                              }
+                              setAssignWarning(null);
+                              setAssignError(result.reason);
+                              return;
+                            }
+                            setAssignError(null);
+                            setAssignWarning(null);
+                            setAssigning((current) =>
+                              current
+                                ? {
+                                    ...current,
+                                    assigneeIds: [...(current.assigneeIds ?? []), employee.id],
+                                  }
+                                : current,
+                            );
+                          } finally {
+                            assignLock.current = false;
+                          }
                         })();
                       }}
                     >
@@ -466,8 +495,10 @@ export function AdminShiftsPanel() {
                   <Button
                     size="sm"
                     onClick={() => {
-                      if (!assigning) return;
+                      if (!assigning || assignLock.current) return;
                       void (async () => {
+                      assignLock.current = true;
+                      try {
                       const result = await assignEmployee(assigning.id, assignWarning.employeeId, {
                         acknowledgeWarnings: true,
                       });
@@ -484,6 +515,9 @@ export function AdminShiftsPanel() {
                           ? { ...current, assigneeIds: [...(current.assigneeIds ?? []), employeeId] }
                           : current,
                       );
+                      } finally {
+                        assignLock.current = false;
+                      }
                       })();
                     }}
                   >
@@ -506,7 +540,10 @@ export function AdminShiftsPanel() {
 
       <Modal
         open={Boolean(confirming)}
-        onClose={() => setConfirming(null)}
+        onClose={() => {
+          if (confirmLock.current) return;
+          setConfirming(null);
+        }}
         title={
           confirming?.kind === "publish"
             ? "Publish this week?"
@@ -529,8 +566,7 @@ export function AdminShiftsPanel() {
           <Button
             size="sm"
             variant={confirming?.kind === "remove" ? "danger" : "primary"}
-            loading={confirmingBusy}
-            onClick={() => void runConfirm()}
+            onClick={runConfirm}
           >
             {confirming?.kind === "publish"
               ? "Publish"

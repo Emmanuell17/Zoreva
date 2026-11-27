@@ -5,7 +5,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
 import { useSchedule } from "@/hooks/use-schedule";
-import { flushScheduleSave } from "@/lib/company/store";
 import { defaultSelectedDays, shiftsToCreate } from "@/lib/shifts/create-defaults";
 import { getShiftPresets } from "@/lib/shift-presets";
 import { calendarDayKey, isSameShiftSlot, signupsForShift } from "@/lib/shift-utils";
@@ -27,16 +26,12 @@ type CreateShiftFormProps = {
   onClose: () => void;
   onCreate: (
     input: CreateShiftInput[],
-  ) =>
-    | void
-    | { ok: true }
-    | { ok: false; reason: string }
-    | Promise<void | { ok: true } | { ok: false; reason: string }>;
+  ) => Promise<{ ok: true } | { ok: false; reason: string }>;
   shift?: Shift | null;
   onUpdate?: (
     shiftId: string,
     input: CreateShiftInput,
-  ) => { ok: true } | { ok: false; reason: string };
+  ) => Promise<{ ok: true } | { ok: false; reason: string }>;
   initialDate?: string;
 };
 
@@ -221,6 +216,7 @@ export function CreateShiftForm({
   }
 
   function handleClose() {
+    if (submittingRef.current) return;
     setForm(getDefaultFormState());
     setSeveralDays(false);
     setSelectedDays(initialSelectedDays(days, initialDate));
@@ -270,120 +266,117 @@ export function CreateShiftForm({
     submittingRef.current = true;
     setSubmitting(true);
     try {
-    const slots = Number(form.slots);
-    const note = form.note.trim() || null;
-    const positions = editing && shift ? [...(shift.positions ?? [])] : [];
+      const slots = Number(form.slots);
+      const note = form.note.trim() || null;
+      const positions = editing && shift ? [...(shift.positions ?? [])] : [];
 
-    if (editing && shift) {
-      const taken = signupsForShift(signups, shift.id).length;
-      if (slots < taken) {
+      if (editing && shift) {
+        const taken = signupsForShift(signups, shift.id).length;
+        if (slots < taken) {
+          setNotice(
+            `${taken} ${taken === 1 ? "person has" : "people have"} already chosen this shift. Keep at least ${taken} spots.`,
+          );
+          return;
+        }
+
+        const input: CreateShiftInput = {
+          date: form.date,
+          startTime: form.startTime,
+          endTime: form.endTime,
+          slots,
+          label: form.label.trim() || null,
+          note,
+          positions,
+        };
+
+        const duplicate = getScheduleSnapshot().shifts.some(
+          (item) => item.id !== shift.id && isSameShiftSlot(item, input),
+        );
+        if (duplicate) {
+          setNotice("That shift already exists for this day and time.");
+          return;
+        }
+
+        const result = onUpdate ? await onUpdate(shift.id, input) : { ok: true as const };
+        if (!result.ok) {
+          setNotice(result.reason);
+          return;
+        }
+
+        submittingRef.current = false;
+        handleClose();
+        return;
+      }
+
+      const dates = severalDays ? selectedDays : [form.date];
+      const selectedTimes = selectedPresets.flatMap((presetLabel) => {
+        const preset = presets.find((item) => item.label === presetLabel);
+        if (!preset) return [];
+        const times = presetTimes[presetLabel] ?? preset;
+        return [
+          {
+            ...preset,
+            startTime: times.startTime,
+            endTime: times.endTime,
+          },
+        ];
+      });
+
+      const inputs: CreateShiftInput[] =
+        !editing && selectedTimes.length > 0
+          ? dates.flatMap((date) =>
+              selectedTimes.map((preset) => ({
+                date,
+                startTime: preset.startTime,
+                endTime: preset.endTime,
+                slots,
+                label: preset.label,
+                note,
+                positions,
+              })),
+            )
+          : [
+              {
+                date: form.date,
+                startTime: form.startTime,
+                endTime: form.endTime,
+                slots,
+                label: form.label.trim() || null,
+                note,
+                positions,
+              },
+            ];
+
+      const currentShifts = getScheduleSnapshot().shifts;
+      const fresh = inputs.filter(
+        (input) => !currentShifts.some((item) => isSameShiftSlot(item, input)),
+      );
+      const duplicateCount = inputs.length - fresh.length;
+
+      if (fresh.length === 0 && duplicateCount > 0) {
         setNotice(
-          `${taken} ${taken === 1 ? "person has" : "people have"} already chosen this shift. Keep at least ${taken} spots.`,
+          severalDays || selectedTimes.length > 0
+            ? "Those shifts are already on the week."
+            : "That shift already exists for this day and time.",
         );
         return;
       }
 
-      const input: CreateShiftInput = {
-        date: form.date,
-        startTime: form.startTime,
-        endTime: form.endTime,
-        slots,
-        label: form.label.trim() || null,
-        note,
-        positions,
-      };
-
-      const duplicate = getScheduleSnapshot().shifts.some(
-        (item) => item.id !== shift.id && isSameShiftSlot(item, input),
-      );
-      if (duplicate) {
-        setNotice("That shift already exists for this day and time.");
+      const created = await onCreate(fresh);
+      if (!created.ok) {
+        setNotice(created.reason);
         return;
       }
 
-      const result = onUpdate?.(shift.id, input) ?? { ok: true as const };
-      if (!result.ok) {
-        setNotice(result.reason);
-        return;
-      }
-      const saved = await flushScheduleSave();
-      if (!saved.ok) {
-        setNotice(saved.reason);
+      if (duplicateCount > 0) {
+        setNotice(
+          `Added ${fresh.length}. ${duplicateCount} already existed and ${duplicateCount === 1 ? "was" : "were"} skipped.`,
+        );
         return;
       }
 
+      submittingRef.current = false;
       handleClose();
-      return;
-    }
-
-    const dates = severalDays ? selectedDays : [form.date];
-    const selectedTimes = selectedPresets.flatMap((presetLabel) => {
-      const preset = presets.find((item) => item.label === presetLabel);
-      if (!preset) return [];
-      const times = presetTimes[presetLabel] ?? preset;
-      return [
-        {
-          ...preset,
-          startTime: times.startTime,
-          endTime: times.endTime,
-        },
-      ];
-    });
-
-    const inputs: CreateShiftInput[] =
-      !editing && selectedTimes.length > 0
-        ? dates.flatMap((date) =>
-            selectedTimes.map((preset) => ({
-              date,
-              startTime: preset.startTime,
-              endTime: preset.endTime,
-              slots,
-              label: preset.label,
-              note,
-              positions,
-            })),
-          )
-        : [
-            {
-              date: form.date,
-              startTime: form.startTime,
-              endTime: form.endTime,
-              slots,
-              label: form.label.trim() || null,
-              note,
-              positions,
-            },
-          ];
-
-    const currentShifts = getScheduleSnapshot().shifts;
-    const fresh = inputs.filter(
-      (input) => !currentShifts.some((item) => isSameShiftSlot(item, input)),
-    );
-    const duplicateCount = inputs.length - fresh.length;
-
-    if (fresh.length === 0 && duplicateCount > 0) {
-      setNotice(
-        severalDays || selectedTimes.length > 0
-          ? "Those shifts are already on the week."
-          : "That shift already exists for this day and time.",
-      );
-      return;
-    }
-
-    const created = await onCreate(fresh);
-    if (created && "ok" in created && !created.ok) {
-      setNotice(created.reason);
-      return;
-    }
-
-    if (duplicateCount > 0) {
-      setNotice(
-        `Added ${fresh.length}. ${duplicateCount} already existed and ${duplicateCount === 1 ? "was" : "were"} skipped.`,
-      );
-      return;
-    }
-
-    handleClose();
     } finally {
       submittingRef.current = false;
       setSubmitting(false);
@@ -609,7 +602,7 @@ export function CreateShiftForm({
 
         {notice ? (
           <p
-            role="status"
+            role="alert"
             className="rounded-md border border-amber-900/80 bg-amber-950/50 px-3 py-2 text-xs leading-relaxed text-amber-200"
           >
             {notice}

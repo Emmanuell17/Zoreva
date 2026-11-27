@@ -70,6 +70,32 @@ export function isPermissionDenied(error: unknown): boolean {
   return code === "permission-denied" || code === "permission_denied";
 }
 
+export const COMPANY_READ_ERROR =
+  "Could not load your company. Check your connection and try again.";
+
+export class CompanyReadError extends Error {
+  readonly denied: boolean;
+
+  constructor(message = COMPANY_READ_ERROR, denied = false) {
+    super(message);
+    this.name = "CompanyReadError";
+    this.denied = denied;
+  }
+}
+
+function failRead(error: unknown, message = COMPANY_READ_ERROR): never {
+  if (error instanceof CompanyReadError) throw error;
+  const denied = isPermissionDenied(error);
+  throw new CompanyReadError(
+    denied ? "You don't have access to this company right now." : message,
+    denied,
+  );
+}
+
+function deniedOnly(error: unknown): boolean {
+  return error instanceof CompanyReadError && error.denied;
+}
+
 function isoFromMillis(value: unknown): string | undefined {
   if (typeof value === "number" && Number.isFinite(value)) {
     return new Date(value).toISOString();
@@ -102,8 +128,8 @@ export async function loadMembershipRemote(
       employeeId: data.employeeId,
       role,
     };
-  } catch {
-    return null;
+  } catch (error) {
+    failRead(error);
   }
 }
 
@@ -116,8 +142,8 @@ export async function loadCompanyIdForOwnerRemote(
     if (!snap.exists()) return null;
     const companyId = snap.data()?.companyId;
     return typeof companyId === "string" ? companyId : null;
-  } catch {
-    return null;
+  } catch (error) {
+    failRead(error);
   }
 }
 
@@ -132,8 +158,8 @@ export async function loadCompanyIdForEmailRemote(
     if (!snap.exists()) return null;
     const companyId = snap.data()?.companyId;
     return typeof companyId === "string" ? companyId : null;
-  } catch {
-    return null;
+  } catch (error) {
+    failRead(error);
   }
 }
 
@@ -149,8 +175,8 @@ export async function loadCompanyIdForJoinCodeRemote(code: string): Promise<stri
       return null;
     }
     return typeof data.companyId === "string" ? data.companyId : null;
-  } catch {
-    return null;
+  } catch (error) {
+    failRead(error, "Could not check that code. Check your connection and try again.");
   }
 }
 
@@ -295,8 +321,8 @@ async function readStaffing(
         .map((item) => timeOffFromDoc(item.id, asRecord(item.data())))
         .filter((item): item is TimeOffRequest => Boolean(item)),
     };
-  } catch {
-    return empty;
+  } catch (error) {
+    failRead(error);
   }
 }
 
@@ -380,8 +406,8 @@ async function readAssignments(
       const employeeId = asString(data.employeeId);
       return shiftId && employeeId ? [{ shiftId, employeeId }] : [];
     });
-  } catch {
-    return [];
+  } catch (error) {
+    failRead(error);
   }
 }
 
@@ -448,8 +474,10 @@ export async function loadManagerCompanyRemote(
       signupSnap = await getDocs(collection(db, "companies", companyId, "signups"));
       hoursSnap = await getDocs(collection(db, "companies", companyId, "hours"));
       directorySnap = await getDocs(collection(db, "companies", companyId, "directory"));
-    } catch {
+    } catch (error) {
       // Membership may not exist yet. The owner can still read the company document.
+      // A network failure is not an empty team.
+      if (!isPermissionDenied(error)) failRead(error);
     }
 
     const emails = new Map<string, string>();
@@ -470,11 +498,20 @@ export async function loadManagerCompanyRemote(
       if (draftSnap.exists()) {
         draftShifts = asShifts(asRecord(draftSnap.data()).shifts);
       }
-    } catch {
-      draftShifts = [];
+    } catch (error) {
+      // A missing membership can hide drafts. A failed read must not look like an empty rota.
+      if (!isPermissionDenied(error) || scheduleSnap || rosterSnap) failRead(error);
     }
 
-    const staffing = await readStaffing(companyId);
+    let staffing = { availability: [] as AvailabilityWindow[], timeOff: [] as TimeOffRequest[] };
+    let assignments: { shiftId: string; employeeId: string }[] = [];
+    try {
+      staffing = await readStaffing(companyId);
+      assignments = await readAssignments(companyId);
+    } catch (error) {
+      const teamWasRead = Boolean(scheduleSnap || rosterSnap || signupSnap || hoursSnap || directorySnap);
+      if (teamWasRead || !deniedOnly(error)) throw error;
+    }
     return {
       legacy: profileIsLegacy(profile) || !scheduleSnap?.exists(),
       company: companyFromParts({
@@ -490,11 +527,11 @@ export async function loadManagerCompanyRemote(
           signupFromDoc(item.id, asRecord(item.data())),
         ),
         hours: (hoursSnap?.docs ?? []).map((item) => hoursFromDoc(item.id, asRecord(item.data()))),
-        assignments: await readAssignments(companyId),
+        assignments,
       }),
     };
-  } catch {
-    return null;
+  } catch (error) {
+    failRead(error);
   }
 }
 
@@ -515,7 +552,7 @@ export async function loadEmployeeCompanyRemote(
           where("employeeId", "==", employeeId),
         ),
       ),
-      getDoc(doc(db, "companies", companyId, "directory", employeeId)).catch(() => null),
+      getDoc(doc(db, "companies", companyId, "directory", employeeId)),
     ]);
 
     const ownEmail =
@@ -538,8 +575,8 @@ export async function loadEmployeeCompanyRemote(
       timeOff: staffing.timeOff,
       assignments: await readAssignments(companyId),
     });
-  } catch {
-    return null;
+  } catch (error) {
+    failRead(error);
   }
 }
 
@@ -795,7 +832,12 @@ export async function clearClosedCompanyLinksRemote(
   } catch {
     // Missing, or the company still exists.
   }
-  return (await loadMembershipRemote(userId)) === null;
+  try {
+    return (await loadMembershipRemote(userId)) === null;
+  } catch (error) {
+    if (error instanceof CompanyReadError) return false;
+    throw error;
+  }
 }
 
 export async function companyClosedForEmployeeRemote(companyId: string): Promise<boolean> {
@@ -805,8 +847,17 @@ export async function companyClosedForEmployeeRemote(companyId: string): Promise
       doc(getFirebaseFirestore(), "companies", companyId, "published", "schedule"),
     );
     return !snap.exists();
-  } catch {
-    return false;
+  } catch (error) {
+    failRead(error);
+  }
+}
+
+async function readForJoin<T>(read: () => Promise<T>): Promise<T> {
+  try {
+    return await read();
+  } catch (error) {
+    if (error instanceof CompanyReadError) throw new JoinFailed(error.message);
+    throw error;
   }
 }
 
@@ -825,14 +876,14 @@ export async function joinCompanyRemote(input: {
   }
 
   await clearClosedCompanyLinksRemote(input.userId, input.email);
-  const owned = await loadCompanyIdForOwnerRemote(input.userId);
+  const owned = await readForJoin(() => loadCompanyIdForOwnerRemote(input.userId));
   if (owned) {
     throw new JoinFailed(
       "This Google account manages a company. Sign out and use a different account to join as an employee.",
     );
   }
 
-  const existing = await loadMembershipRemote(input.userId);
+  const existing = await readForJoin(() => loadMembershipRemote(input.userId));
   if (existing?.role === "ADMIN") {
     throw new JoinFailed(
       "This Google account manages a company. Sign out and use a different account to join as an employee.",
@@ -842,7 +893,7 @@ export async function joinCompanyRemote(input: {
     throw new JoinFailed("This account already joined a company.");
   }
 
-  const companyId = await loadCompanyIdForJoinCodeRemote(code);
+  const companyId = await readForJoin(() => loadCompanyIdForJoinCodeRemote(code));
   if (!companyId) {
     throw new JoinFailed(
       "That code was not found. Check it with your manager, or ask them to open Zoreva if they just created it.",
@@ -1418,6 +1469,7 @@ type WatchParts = {
 export function watchManagerWorkspace(
   companyId: string,
   onCompany: (company: Company) => void,
+  onError?: (message: string) => void,
 ): Unsubscribe | null {
   if (!canUseFirestore()) return null;
   const db = getFirebaseFirestore();
@@ -1435,6 +1487,10 @@ export function watchManagerWorkspace(
     timeOffLoaded: false,
     emails: new Map(),
     assignments: [],
+  };
+
+  const fail = () => {
+    onError?.(COMPANY_READ_ERROR);
   };
 
   const emit = () => {
@@ -1467,7 +1523,7 @@ export function watchManagerWorkspace(
         parts.profile = asRecord(snap.data());
         emit();
       },
-      () => undefined,
+      fail,
     ),
     onSnapshot(
       doc(db, "companies", companyId, "published", "schedule"),
@@ -1475,7 +1531,7 @@ export function watchManagerWorkspace(
         parts.schedule = snap.exists() ? asRecord(snap.data()) : null;
         emit();
       },
-      () => undefined,
+      fail,
     ),
     onSnapshot(
       doc(db, "companies", companyId, "drafts", "rota"),
@@ -1484,11 +1540,7 @@ export function watchManagerWorkspace(
         parts.draftsLoaded = true;
         emit();
       },
-      () => {
-        parts.drafts = [];
-        parts.draftsLoaded = true;
-        emit();
-      },
+      fail,
     ),
     onSnapshot(
       collection(db, "companies", companyId, "roster"),
@@ -1496,7 +1548,7 @@ export function watchManagerWorkspace(
         parts.roster = snap.docs.map((item) => userFromRoster(asRecord(item.data())));
         emit();
       },
-      () => undefined,
+      fail,
     ),
     onSnapshot(
       collection(db, "companies", companyId, "signups"),
@@ -1504,7 +1556,7 @@ export function watchManagerWorkspace(
         parts.signups = snap.docs.map((item) => signupFromDoc(item.id, asRecord(item.data())));
         emit();
       },
-      () => undefined,
+      fail,
     ),
     onSnapshot(
       collection(db, "companies", companyId, "hours"),
@@ -1512,7 +1564,7 @@ export function watchManagerWorkspace(
         parts.hours = snap.docs.map((item) => hoursFromDoc(item.id, asRecord(item.data())));
         emit();
       },
-      () => undefined,
+      fail,
     ),
     onSnapshot(
       collection(db, "companies", companyId, "availability"),
@@ -1523,11 +1575,7 @@ export function watchManagerWorkspace(
         parts.availabilityLoaded = true;
         emit();
       },
-      () => {
-        parts.availability = [];
-        parts.availabilityLoaded = true;
-        emit();
-      },
+      fail,
     ),
     onSnapshot(
       collection(db, "companies", companyId, "timeOff"),
@@ -1538,11 +1586,7 @@ export function watchManagerWorkspace(
         parts.timeOffLoaded = true;
         emit();
       },
-      () => {
-        parts.timeOff = [];
-        parts.timeOffLoaded = true;
-        emit();
-      },
+      fail,
     ),
     onSnapshot(
       collection(db, "companies", companyId, "directory"),
@@ -1554,7 +1598,7 @@ export function watchManagerWorkspace(
         });
         emit();
       },
-      () => undefined,
+      fail,
     ),
     onSnapshot(
       collection(db, "companies", companyId, "assignments"),
@@ -1567,10 +1611,7 @@ export function watchManagerWorkspace(
         });
         emit();
       },
-      () => {
-        parts.assignments = [];
-        emit();
-      },
+      fail,
     ),
   ];
 
@@ -1583,6 +1624,7 @@ export function watchEmployeeWorkspace(
   companyId: string,
   employeeId: string,
   onCompany: (company: Company) => void,
+  onError?: (message: string) => void,
 ): Unsubscribe | null {
   if (!canUseFirestore()) return null;
   const db = getFirebaseFirestore();
@@ -1600,6 +1642,10 @@ export function watchEmployeeWorkspace(
     timeOffLoaded: false,
     emails: new Map(),
     assignments: [],
+  };
+
+  const fail = () => {
+    onError?.(COMPANY_READ_ERROR);
   };
 
   const emit = () => {
@@ -1630,7 +1676,7 @@ export function watchEmployeeWorkspace(
         parts.schedule = asRecord(snap.data());
         emit();
       },
-      () => undefined,
+      fail,
     ),
     onSnapshot(
       collection(db, "companies", companyId, "roster"),
@@ -1638,7 +1684,7 @@ export function watchEmployeeWorkspace(
         parts.roster = snap.docs.map((item) => userFromRoster(asRecord(item.data())));
         emit();
       },
-      () => undefined,
+      fail,
     ),
     onSnapshot(
       collection(db, "companies", companyId, "signups"),
@@ -1646,7 +1692,7 @@ export function watchEmployeeWorkspace(
         parts.signups = snap.docs.map((item) => signupFromDoc(item.id, asRecord(item.data())));
         emit();
       },
-      () => undefined,
+      fail,
     ),
     onSnapshot(
       query(
@@ -1657,7 +1703,7 @@ export function watchEmployeeWorkspace(
         parts.hours = snap.docs.map((item) => hoursFromDoc(item.id, asRecord(item.data())));
         emit();
       },
-      () => undefined,
+      fail,
     ),
     onSnapshot(
       query(
@@ -1671,11 +1717,7 @@ export function watchEmployeeWorkspace(
         parts.availabilityLoaded = true;
         emit();
       },
-      () => {
-        parts.availability = [];
-        parts.availabilityLoaded = true;
-        emit();
-      },
+      fail,
     ),
     onSnapshot(
       query(
@@ -1689,11 +1731,7 @@ export function watchEmployeeWorkspace(
         parts.timeOffLoaded = true;
         emit();
       },
-      () => {
-        parts.timeOff = [];
-        parts.timeOffLoaded = true;
-        emit();
-      },
+      fail,
     ),
     onSnapshot(
       doc(db, "companies", companyId, "directory", employeeId),
@@ -1703,7 +1741,7 @@ export function watchEmployeeWorkspace(
         }
         emit();
       },
-      () => undefined,
+      fail,
     ),
     onSnapshot(
       collection(db, "companies", companyId, "assignments"),
@@ -1716,10 +1754,7 @@ export function watchEmployeeWorkspace(
         });
         emit();
       },
-      () => {
-        parts.assignments = [];
-        emit();
-      },
+      fail,
     ),
   ];
 
